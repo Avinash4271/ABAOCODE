@@ -1,0 +1,1895 @@
+*&---------------------------------------------------------------------*
+*& Report ZPP_QM_LOT_SINGLE
+*&---------------------------------------------------------------------*
+*&--------------------------------------------------------------------*
+*PROGRAM.......ZPP_QM_LOT_SINGLE                                      *
+*T-CODE........ZQM105                                                 *
+*TITLE......... DOL Master maintenance at plant level                 *
+*AUTHOR........ Avinash Devkar                                        *
+*FUNCTIONAL.... Anil Bhandurage                                       *
+*DATE WRITTEN.. 10, 07 2026                                           *
+*R/3 RELEASE... E.C.C 6.0                                             *
+*&--------------------------------------------------------------------*
+*&---------------------------------------------------------------------*
+REPORT zpp_qm_lot_single.
+
+TABLES: zqm_lot.
+
+DATA:
+  gt_sellist TYPE STANDARD TABLE OF vimsellist.
+
+DATA:
+  gt_werks TYPE RANGE OF zqm_lot-werks,
+  gt_lifnr TYPE RANGE OF zqm_lot-lifnr.
+PARAMETERS:
+  p_werks TYPE zqm_lot-werks OBLIGATORY,
+  p_lifnr TYPE zqm_lot-lifnr OBLIGATORY.
+
+
+
+AT SELECTION-SCREEN.
+
+  SELECT SINGLE * FROM zqm_lot_user WHERE werks = @p_werks AND uname = @sy-uname INTO @DATA(ls_usr).
+  IF sy-subrc NE 0.
+    MESSAGE 'No Authorization For Given Plant....' TYPE 'E'.
+  ENDIF.
+
+START-OF-SELECTION.
+
+  "------------------------------------------------------------
+  " Create Plant range
+  "------------------------------------------------------------
+  APPEND VALUE #(
+    sign   = 'I'
+    option = 'EQ'
+    low    = p_werks
+  ) TO gt_werks.
+
+  "------------------------------------------------------------
+  " Create Material range
+  "------------------------------------------------------------
+  APPEND VALUE #(
+    sign   = 'I'
+    option = 'EQ'
+    low    = p_lifnr
+  ) TO gt_lifnr.
+
+  "------------------------------------------------------------
+  " Convert Plant range to TMG selection condition
+  "------------------------------------------------------------
+  CALL FUNCTION 'VIEW_RANGETAB_TO_SELLIST'
+    EXPORTING
+      fieldname          = 'WERKS'
+      append_conjunction = 'AND'
+    TABLES
+      sellist            = gt_sellist
+      rangetab           = gt_werks
+    EXCEPTIONS
+      OTHERS             = 1.
+
+  IF sy-subrc <> 0.
+    MESSAGE 'Error creating Plant selection condition' TYPE 'E'.
+  ENDIF.
+
+  "------------------------------------------------------------
+  " Convert Material range to TMG selection condition
+  "------------------------------------------------------------
+  CALL FUNCTION 'VIEW_RANGETAB_TO_SELLIST'
+    EXPORTING
+      fieldname          = 'LIFNR'
+      append_conjunction = 'AND'
+    TABLES
+      sellist            = gt_sellist
+      rangetab           = gt_LIFNR
+    EXCEPTIONS
+      OTHERS             = 1.
+
+  IF sy-subrc <> 0.
+    MESSAGE 'Error creating Material selection condition' TYPE 'E'.
+  ENDIF.
+
+
+  "--------------------------------------------------
+  " Call TMG
+  "--------------------------------------------------
+  CALL FUNCTION 'VIEW_MAINTENANCE_CALL'
+    EXPORTING
+      action                       = 'U'
+      view_name                    = 'ZQM_LOT'
+    TABLES
+      dba_sellist                  = gt_sellist
+    EXCEPTIONS
+      client_reference             = 1
+      foreign_lock                 = 2
+      invalid_action               = 3
+      no_clientindependent_auth    = 4
+      no_show_auth                 = 5
+      no_tvdir_entry               = 6
+      no_upd_auth                  = 7
+      only_show_allowed            = 8
+      system_failure               = 9
+      unknown_field_in_dba_sellist = 10
+      missing_corr_number          = 11
+      OTHERS                       = 12.
+
+  IF sy-subrc <> 0.
+    MESSAGE 'DATA is not found' TYPE 'E'.
+  ENDIF.
+
+
+------------------------------------------------------------------------------------------------------------------------------------
+Ammendment report
+------------------------------------------------------------------------------------------------------------------------------------
+
+*&---------------------------------------------------------------------*
+*& Report ZMM_PUR_AMENDMENT_RPT
+*&---------------------------------------------------------------------*
+*&
+*&---------------------------------------------------------------------*
+*&*&---------------------------------------------------------------------*
+*& T-CODE........ ZMM_AMEND   *
+*& TITLE......... Purchase Amendment Report                            *
+*& AUTHOR........ Avinash Devkar    402167                             *
+*& FUNCTIONAL.... Vijay tokle                                         *
+*& DATE WRITTEN.. Sep 15, 2025                                        *
+*& R/3 RELEASE... S4 HANA                                            *
+*&---------------------------------------------------------------------*
+*&---------------------------------------------------------------------*
+REPORT zmm_pur_amendment_rpt.
+TABLES sscrfields.
+TYPES : BEGIN OF ty_final,
+          bukrs       TYPE bukrs,
+          werks       TYPE werks_d,
+          ebeln       TYPE ebeln,
+          ebelp       TYPE ebelp,
+          knumh       TYPE knumh,
+          lifnr       TYPE lifnr,
+          name1       TYPE name1_gp,
+          matnr       TYPE matnr,
+          maktx       TYPE maktx,
+          bgrpn       TYPE zbgrpn,
+          bgrpt       TYPE oiuhs_grp_desc,
+          bmatnr      TYPE zbasematnr,
+          brgew       TYPE zbrgew,
+          datbi       TYPE kodatbi,
+          datab       TYPE kodatab,
+          kbetr       TYPE kbetr_kond,
+          meins       TYPE meins,
+          kbetr1      TYPE kbetr_kond,
+          Rate        TYPE kbetr_kond,
+          menge       TYPE menge_D,
+          aimP        TYPE kbetr_kond,
+          disc        TYPE kbetr_kond,
+          netp        TYPE kbetr_kond,
+          Diff        TYPE kbetr_kond,
+          tot_p       TYPE kbetr_kond,
+          field_style TYPE lvc_t_styl,
+        END OF ty_final.
+DATA : gv_date     TYPE datbi,
+       gv_lifnr    TYPE lifnr,
+       gv_matnr    TYPE matnr,
+       gv_werks    TYPE werks_d,
+       gv_BGRPN    TYPE zBGRPN,
+       gt_fieldcat TYPE lvc_t_fcat,
+       ls_styl     TYPE lvc_s_styl.
+
+DATA : gv_menge TYPE menge_d,
+       gv_aimP  TYPE kbetr_kond,
+       gv_disc  TYPE kbetr_kond.
+DATA : ok_code TYPE sy-ucomm.
+CLASS lcl_event_receiver DEFINITION DEFERRED.
+DATA : g_container        TYPE scrfname VALUE 'ZMM_AMEND',
+       g_grid             TYPE REF TO cl_gui_alv_grid,
+       g_custom_container TYPE REF TO cl_gui_custom_container,
+       g_event_receiver   TYPE REF TO lcl_event_receiver.
+DATA : gt_final1     TYPE TABLE OF ty_final,
+       gs_final1     TYPE ty_final,
+       gt_final_temp TYPE TABLE OF ty_final,
+       gs_final_temp TYPE ty_final,
+       gt_table      TYPE TABLE OF zmm_pur_amend,
+       gs_table      TYPE zmm_pur_amend,
+       gs_layout     TYPE lvc_s_layo.
+SELECTION-SCREEN BEGIN OF BLOCK b1 WITH FRAME TITLE TEXT-001.
+  PARAMETERS : p_bukrs TYPE bukrs.
+*               p_werks TYPE werks_d OBLIGATORY.
+
+  SELECT-OPTIONS : s_werks FOR gv_werks.
+  PARAMETERS :    p_date TYPE datum .
+  SELECT-OPTIONS :       s_lifnr FOR gv_lifnr,
+              s_matnr FOR gv_matnr,
+              s_grp   FOR gv_BGRPN MODIF ID m1.
+  PARAMETERS : p_chk AS CHECKBOX  USER-COMMAND cl.
+SELECTION-SCREEN END OF BLOCK b1.
+
+
+AT SELECTION-SCREEN OUTPUT.
+  IF p_chk IS  INITIAL.
+    LOOP AT SCREEN.
+      IF screen-group1 = 'M1'.
+        screen-active = '0'.
+        MODIFY SCREEN.
+      ENDIF.
+    ENDLOOP.
+  ENDIF.
+
+AT SELECTION-SCREEN ON VALUE-REQUEST FOR s_grp-low.
+
+  SELECT bgrpn, bgrpt FROM ztb2b_base_grp INTO TABLE @DATA(gt_f4).
+  CALL FUNCTION 'F4IF_INT_TABLE_VALUE_REQUEST'
+    EXPORTING
+      retfield        = 'BGRPN'          " The column name from internal table to return
+      dynpprog        = sy-repid         " Current program name
+      dynpnr          = sy-dynnr         " Current screen number
+      dynprofield     = 'S_GRP-LOW'        " Parameter field name on the screen
+      value_org       = 'S'              " Structure 'S' or Line 'C'
+    TABLES
+      value_tab       = gt_f4        " Table containing data to display
+    EXCEPTIONS
+      parameter_error = 1
+      no_values_found = 2
+      OTHERS          = 3.
+
+AT SELECTION-SCREEN.
+  IF sscrfields-ucomm = 'ONLI'.
+    IF p_bukrs IS INITIAL.
+      MESSAGE 'Please Enter Company code' TYPE 'E'.
+    ELSEIF s_werks IS INITIAL.
+      MESSAGE 'Please Enter Plant' TYPE 'E'.
+    ELSEIF p_date IS INITIAL.
+      MESSAGE 'Please Enter Date' TYPE 'E'.
+    ENDIF.
+  ENDIF.
+
+
+
+CLASS lcl_event_receiver DEFINITION.
+
+  PUBLIC SECTION.
+
+    METHODS : handle_data_changed
+      FOR EVENT data_changed OF cl_gui_alv_grid
+      IMPORTING er_data_changed.
+
+  PRIVATE SECTION.
+
+    DATA: error_in_data TYPE c.
+
+    METHODS : check_menge_data
+      IMPORTING
+        ps_good         TYPE lvc_s_modi
+        pr_data_changed TYPE REF TO cl_alv_changed_data_protocol.
+
+    METHODS : check_data
+      IMPORTING
+        ps_good         TYPE lvc_s_modi
+        pr_data_changed TYPE REF TO cl_alv_changed_data_protocol.
+
+ENDCLASS.
+CLASS lcl_event_receiver IMPLEMENTATION.
+  METHOD handle_data_changed.
+    DATA: ls_good TYPE lvc_s_modi.
+    DATA: lv_row    TYPE i,
+          lv_column TYPE i,
+          lv_row_id TYPE lvc_s_row,
+          lv_col_id TYPE lvc_s_col,
+          lv_row_no TYPE lvc_s_roid,
+          ls_stable TYPE lvc_s_stbl.
+    error_in_data = space.
+
+    g_grid->get_current_cell(
+      IMPORTING
+        e_row     = lv_row              " Row on Grid
+*       e_value   = lv_column             " Value
+        e_col     = lv_column             " Column on Grid
+        es_row_id = lv_row_id              " Row ID
+        es_col_id = lv_col_id            " Column ID
+        es_row_no = lv_row_no            " Numeric Row ID
+    ).
+    LOOP AT er_data_changed->mt_good_cells INTO ls_good.
+      CASE ls_good-fieldname.
+        WHEN 'AIMP'.
+          gv_aimp = ls_good-value.
+        WHEN 'MENGE'.
+          gv_menge = ls_good-value.
+        WHEN 'DISC'.
+          gv_disc = ls_good-value.
+      ENDCASE.
+      AT END OF row_id.
+        READ TABLE gt_final1 ASSIGNING FIELD-SYMBOL(<gfs_final>) INDEX ls_good-row_id.
+        IF sy-subrc = 0.
+          IF gv_aimp IS NOT INITIAL AND gv_disc IS NOT INITIAL.
+            <gfs_final>-netp = gv_aimp - (  gv_disc / 100 * gv_aimp ).
+          ELSEIF gv_aimp IS INITIAL AND gv_disc IS NOT INITIAL.
+            <gfs_final>-netp = <gfs_final>-aimp - (  gv_disc / 100 * <gfs_final>-aimp  ).
+          ELSEIF gv_aimp IS NOT INITIAL AND gv_disc IS INITIAL.
+            <gfs_final>-netp = gv_aimp - (  <gfs_final>-disc / 100 * gv_aimp  ).
+          ENDIF.
+
+          <gfs_final>-diff = <gfs_final>-netp - <gfs_final>-kbetr.
+          IF gv_menge IS NOT INITIAL.
+            <gfs_final>-tot_p = <gfs_final>-diff * gv_menge.
+          ELSEIF gv_menge IS INITIAL.
+            <gfs_final>-tot_p = <gfs_final>-diff * <gfs_final>-menge.
+          ENDIF.
+          CLEAR : gv_menge, gv_aimp, gv_disc.
+        ENDIF.
+      ENDAT.
+    ENDLOOP.
+    ls_stable-row = 'X'.
+    ls_stable-col = 'X'.
+    CALL METHOD g_grid->refresh_table_display(
+        is_stable = ls_stable ).
+    g_grid->set_current_cell_via_id(
+      EXPORTING
+        is_row_id    = lv_row_id                   " Row
+        is_column_id = lv_col_id                 " Column
+        is_row_no    = lv_row_no             " Numeric Row ID
+    ).
+  ENDMETHOD.
+  METHOD check_menge_data.
+
+  ENDMETHOD.
+  METHOD check_data.
+  ENDMETHOD.
+ENDCLASS.
+
+START-OF-SELECTION.
+  IF p_date IS NOT INITIAL.
+    p_date = p_date - 1.
+  ENDIF.
+  gv_date = '20170625'.
+  PERFORM get_data.
+FORM get_data.
+
+
+  SELECT * FROM a016
+               WHERE kschl = 'PI00'
+               AND   evrtn LIKE  '19%'
+               AND   datab LT @p_date
+               AND   datab GT @gv_date
+  INTO TABLE @DATA(gt_a016).
+
+  SORT gt_a016 BY evrtn evrtp datab DESCENDING datbi DESCENDING.
+  DELETE ADJACENT DUPLICATES FROM gt_a016 COMPARING evrtn evrtp.
+
+  SELECT FROM @gt_a016 AS a
+                   INNER JOIN konp AS k
+                    ON k~knumh = a~knumh
+                    AND k~kschl = 'PI00'
+                     LEFT JOIN konp AS k1
+                    ON k1~knumh = k~knumh
+                    AND k~kschl = 'R005'
+                    LEFT JOIN ekpo AS e
+                    ON e~ebeln = a~evrtn
+                    AND e~ebelp = a~evrtp
+                    AND e~loekz NE 'X'
+                    LEFT JOIN makt AS m
+                    ON m~matnr = e~matnr
+                    AND m~spras = 'E'
+                    LEFT JOIN ekko AS ek
+                    ON ek~ebeln = a~evrtn
+                    INNER JOIN lfa1 AS l
+                    ON l~lifnr = ek~lifnr
+                    LEFT JOIN ztp_vend_bom  AS z
+                    ON z~werks = e~werks
+                    AND z~idnrk = m~matnr
+                    LEFT JOIN ztb2b_base_grp AS z1
+                    ON z1~bgrpn = z~bgrpn
+      FIELDS DISTINCT e~bukrs,e~werks,e~ebeln,e~ebelp,k~knumh, ek~lifnr,l~name1,
+                      e~matnr,m~maktx,z~bgrpn,z1~bgrpt,z~bmatnr,z~brgew, a~datab, a~datbi,k~kbetr, k~meins,
+                      CAST( division( k1~kbetr , 100 , 1 ) AS DEC( 11,2 ) ) AS kbetr1,
+                      CAST( (  k~kbetr - ( k~kbetr * division( k1~kbetr , 100 , 1 )  ) ) AS DEC( 11,2 )  ) AS rate
+              WHERE  e~matnr IN @s_matnr
+               AND   ek~lifnr IN @s_lifnr
+               AND   e~werks IN @s_werks
+               AND   z~bgrpn IN @s_grp
+               AND   e~bukrs = @p_bukrs
+  INTO TABLE @DATA(gt_final).
+
+
+  SELECT * FROM zmm_pur_amend INTO TABLE @DATA(gt_amend)
+    WHERE bukrs = @p_bukrs
+    AND   werks IN @s_werks
+  AND  matnr IN @s_matnr.
+
+  IF gt_final IS NOT INITIAL.
+
+    SELECT FROM mseg AS m
+           INNER JOIN @gt_final AS g
+           ON m~werks = g~werks
+           AND m~matnr = g~matnr
+           AND m~ebeln = g~ebeln
+           AND m~ebelp = g~ebelp
+           AND m~budat_mkpf GE g~datab
+           AND m~budat_mkpf LE g~datbi
+           AND m~bwart IN ( '101','102','122','123' )
+           FIELDS m~werks,m~matnr, m~ebeln , m~ebelp,
+           SUM( CASE
+                   WHEN bwart = '101' THEN menge
+                   WHEN bwart = '122' THEN -menge
+                   WHEN bwart = '102' THEN -menge
+                   WHEN bwart = '123' THEN menge
+                   ELSE 0
+                END ) AS qty
+                GROUP BY m~werks, m~matnr, m~ebeln, m~ebelp
+    INTO TABLE @DATA(gt_mseg).
+
+  ENDIF.
+
+  LOOP AT gt_final INTO DATA(gs_final).
+
+    READ TABLE gt_amend INTO DATA(gs_amend) WITH KEY werks = gs_final-werks
+                                                     matnr = gs_final-matnr
+                                                     ebeln = gs_final-ebeln
+                                                     ebelp = gs_final-ebelp
+                                                     lifnr = gs_final-lifnr
+                                                     datbi = gs_final-datbi.
+    IF sy-subrc = 0.
+
+      gs_final1 = CORRESPONDING #( gs_amend ).
+      SELECT SINGLE maktx INTO @gs_final1-maktx FROM makt WHERE matnr = @gs_final1-matnr AND spras = 'E'.
+      SELECT SINGLE name1 INTO @gs_final1-name1 FROM lfa1 WHERE lifnr = @gs_final1-lifnr.
+
+    ELSE.
+      READ TABLE gt_mseg INTO DATA(gs_mseg) WITH KEY werks = gs_final-werks
+                                                     matnr = gs_final-matnr
+                                                     ebeln = gs_final-ebeln
+                                                     ebelp = gs_final-ebelp.
+      IF sy-subrc = 0.
+
+        gs_final1 = CORRESPONDING #( gs_final ).
+        gs_final1-rate = gs_final1-kbetr - ( gs_final1-kbetr * gs_final1-kbetr1 ).
+        gs_final1-menge = gs_mseg-qty.
+        gs_final1-disc = gs_final-kbetr1.
+
+      ENDIF.
+
+    ENDIF.
+    IF gs_final1 IS NOT INITIAL.
+      IF gs_final1-aimp IS NOT INITIAL.
+        ls_styl-fieldname = 'AIMP'.
+        ls_styl-style     = cl_gui_alv_grid=>mc_style_disabled.
+        APPEND ls_styl TO gs_final1-field_style.
+        ls_styl-fieldname = 'DISC'.
+        ls_styl-style     = cl_gui_alv_grid=>mc_style_disabled.
+        APPEND ls_styl TO gs_final1-field_style.
+      ENDIF.
+*      IF gs_final1-disc IS NOT INITIAL.
+*        ls_styl-fieldname = 'DISC'.
+*        ls_styl-style     = cl_gui_alv_grid=>mc_style_disabled.
+*        APPEND ls_styl TO gs_final1-field_style.
+*      ENDIF.
+      APPEND gs_final1 TO gt_final1.
+    ENDIF.
+    CLEAR : gs_final1,gs_final,gs_mseg,gs_amend.
+
+
+  ENDLOOP.
+
+  gt_final_temp = gt_final1.
+  CALL SCREEN '0100'.
+
+ENDFORM.
+
+*&---------------------------------------------------------------------*
+*& Module STATUS_0100 OUTPUT
+*&---------------------------------------------------------------------*
+*&
+*&---------------------------------------------------------------------*
+MODULE status_0100 OUTPUT.
+  SET PF-STATUS 'MAIN'.
+  SET TITLEBAR 'MAIN'.
+ENDMODULE.
+*&---------------------------------------------------------------------*
+*& Module PBO OUTPUT
+*&---------------------------------------------------------------------*
+*&
+*&---------------------------------------------------------------------*
+MODULE pbo OUTPUT.
+  IF g_custom_container IS INITIAL.
+    PERFORM create_and_init_alv CHANGING gt_final1
+                                         gt_fieldcat
+                                         gs_layout.
+
+  ENDIF.
+ENDMODULE.
+*&---------------------------------------------------------------------*
+*& Form create_and_init_alv
+*&---------------------------------------------------------------------*
+*& text
+*&---------------------------------------------------------------------*
+*&      <-- GT_FINAL1
+*&      <-- GT_FIELDCAT
+*&---------------------------------------------------------------------*
+FORM create_and_init_alv  CHANGING p_gt_final1 LIKE gt_final1
+                                   p_gt_fieldcat TYPE lvc_t_fcat
+                                   ps_layout TYPE lvc_s_layo..
+
+  DATA: lt_exclude TYPE ui_functions.
+
+
+  CREATE OBJECT g_custom_container
+    EXPORTING
+      container_name = g_container.
+
+  CREATE OBJECT g_grid
+    EXPORTING
+      i_parent = g_custom_container.
+
+  gt_fieldcat = VALUE lvc_t_fcat(
+
+    ( fieldname = 'BUKRS'   scrtext_l = 'Company Code'             col_pos =  1 fix_column = 'X' )
+    ( fieldname = 'WERKS'   scrtext_l = 'Plant'                    col_pos =  2 fix_column = 'X' )
+    ( fieldname = 'EBELN'   scrtext_l = 'PO Number'                col_pos =  3 fix_column = 'X' )
+    ( fieldname = 'EBELP'   scrtext_l = 'PO Item'                  col_pos =  4 fix_column = 'X' )
+    ( fieldname = 'LIFNR'   scrtext_l = 'Vendor'                   col_pos =  5 fix_column = 'X' )
+    ( fieldname = 'NAME1'   scrtext_l = 'Vendor Name'              col_pos =  6 fix_column = 'X' )
+    ( fieldname = 'MATNR'   scrtext_l = 'Material'                 col_pos =  7 fix_column = 'X' )
+    ( fieldname = 'MAKTX'   scrtext_l = 'Description'              col_pos =  8 fix_column = 'X' )
+    ( fieldname = 'BGRPN'   scrtext_l = 'Base Group'               col_pos =  9 fix_column = 'X' )
+    ( fieldname = 'BGRPT'   scrtext_l = 'Base Group Description'   col_pos = 10 fix_column = 'X' )
+    ( fieldname = 'BMATNR'  scrtext_l = 'Base Material Code'       col_pos = 11 fix_column = 'X' )
+    ( fieldname = 'BRGEW'   scrtext_l = 'Receipt Quantity'         col_pos = 12 fix_column = 'X' )
+    ( fieldname = 'DATAB'   scrtext_l = 'Valid From'               col_pos = 13 fix_column = 'X' )
+    ( fieldname = 'DATBI'   scrtext_l = 'Valid To'                 col_pos = 14 fix_column = 'X' )
+    ( fieldname = 'KBETR'   scrtext_l = 'Rate'                     col_pos = 15 fix_column = 'X' )
+    ( fieldname = 'MEINS'   scrtext_l = 'UoM'                      col_pos = 16 fix_column = 'X' )
+    ( fieldname = 'KBETR1'  scrtext_l = 'Discount Value'           col_pos = 17 fix_column = 'X' )
+    ( fieldname = 'RATE'    scrtext_l = 'Net Rate'                 col_pos = 18 fix_column = 'X' )
+
+    " Editable fields
+    ( fieldname = 'MENGE'   scrtext_l = 'Quantity'                 col_pos = 19 fix_column = 'X' )
+    ( fieldname = 'AIMP'    scrtext_l = 'To be Aim Price'          col_pos = 20 edit = 'X' datatype = 'CURR' fix_column = 'X' )
+    ( fieldname = 'DISC'    scrtext_l = 'Discount %'               col_pos = 21 edit = 'X' datatype = 'CURR' fix_column = 'X' )
+
+    ( fieldname = 'NETP'    scrtext_l = 'To be Net Price'          col_pos = 22 fix_column = 'X' )
+    ( fieldname = 'DIFF'    scrtext_l = 'Delta Difference'         col_pos = 23 fix_column = 'X' )
+    ( fieldname = 'TOT_P'   scrtext_l = 'Total Provision'          col_pos = 24 fix_column = 'X' )
+
+  ).
+  ps_layout-stylefname = 'FIELD_STYLE'.
+  ps_layout-cwidth_opt = 'X'.
+*§2.Optionally restrict generic functions to 'change only'.
+*   (The user shall not be able to add new lines).
+  PERFORM exclude_tb_functions CHANGING lt_exclude.
+
+  CALL METHOD g_grid->set_table_for_first_display
+    EXPORTING
+      is_layout            = ps_layout
+      it_toolbar_excluding = lt_exclude
+    CHANGING
+      it_fieldcatalog      = gt_fieldcat
+      it_outtab            = p_gt_final1.
+
+* set editable cells to ready for input
+  CALL METHOD g_grid->set_ready_for_input
+    EXPORTING
+      i_ready_for_input = 1.
+
+*§3.Optionally register ENTER to raise event DATA_CHANGED.
+*   (Per default the user may check data by using the check icon).
+  CALL METHOD g_grid->register_edit_event
+    EXPORTING
+      i_event_id = cl_gui_alv_grid=>mc_evt_enter.
+
+  CREATE OBJECT g_event_receiver.
+  SET HANDLER g_event_receiver->handle_data_changed FOR g_grid.
+ENDFORM.
+*&---------------------------------------------------------------------*
+*& Form exclude_tb_functions
+*&---------------------------------------------------------------------*
+*& text
+*&---------------------------------------------------------------------*
+*&      <-- LT_EXCLUDE
+*&---------------------------------------------------------------------*
+FORM exclude_tb_functions  CHANGING pt_exclude TYPE ui_functions.
+  DATA ls_exclude TYPE ui_func.
+
+  ls_exclude = cl_gui_alv_grid=>mc_fc_loc_copy_row.
+  APPEND ls_exclude TO pt_exclude.
+  ls_exclude = cl_gui_alv_grid=>mc_fc_loc_delete_row.
+  APPEND ls_exclude TO pt_exclude.
+  ls_exclude = cl_gui_alv_grid=>mc_fc_loc_append_row.
+  APPEND ls_exclude TO pt_exclude.
+  ls_exclude = cl_gui_alv_grid=>mc_fc_loc_insert_row.
+  APPEND ls_exclude TO pt_exclude.
+  ls_exclude = cl_gui_alv_grid=>mc_fc_loc_move_row.
+  APPEND ls_exclude TO pt_exclude.
+ENDFORM.
+*&---------------------------------------------------------------------*
+*&      Module  EXIT  INPUT
+*&---------------------------------------------------------------------*
+*       text
+*----------------------------------------------------------------------*
+MODULE exit INPUT.
+  CASE ok_code.
+    WHEN 'EXIT'.
+      LEAVE PROGRAM.
+    WHEN 'CANCEL'.
+      LEAVE PROGRAM.
+  ENDCASE.
+ENDMODULE.
+*&---------------------------------------------------------------------*
+*&      Module  USER_COMMAND_0100  INPUT
+*&---------------------------------------------------------------------*
+*       text
+*----------------------------------------------------------------------*
+MODULE user_command_0100 INPUT.
+  CASE ok_code.
+    WHEN 'BACK'.
+      LEAVE TO SCREEN 0.
+    WHEN 'SAVE'.
+
+      IF gt_final1 IS NOT INITIAL.
+        DATA lv_ans TYPE char1.
+        CLEAR lv_ans.
+        CALL FUNCTION 'POPUP_TO_CONFIRM_STEP'
+          EXPORTING
+            defaultoption  = 'Y'
+            textline1      = ''
+            textline2      = 'Do you want to proceed...?'
+            titel          = 'Confirm'
+            start_column   = 25
+            start_row      = 6
+            cancel_display = ' '
+          IMPORTING
+            answer         = lv_ans.
+
+        IF lv_ans = 'J'.
+          LOOP AT gt_final_temp INTO DATA(gs_temp).
+            DATA(lv_tabix) = sy-tabix.
+            READ TABLE gt_final1 INTO gs_final1 INDEX lv_tabix.
+            IF sy-subrc EQ 0.
+              IF gs_temp NE gs_final1.
+
+                gs_table = CORRESPONDING #( gs_final1 ).
+                APPEND gs_table TO gt_table.
+                CLEAR: gs_final1, gs_table.
+              ENDIF.
+            ENDIF.
+          ENDLOOP.
+          IF  gt_table IS NOT INITIAL.
+            MODIFY zmm_pur_amend FROM TABLE gt_table.
+            IF sy-subrc = 0.
+              MESSAGE 'Data Uploaded successfully' TYPE 'S' DISPLAY LIKE 'I'.
+              LEAVE PROGRAM.
+            ENDIF.
+          ENDIF.
+        ELSEIF lv_ans = 'A'.
+          LEAVE PROGRAM.
+        ENDIF.
+
+      ENDIF.
+
+  ENDCASE.
+ENDMODULE.
+-------------------------------------------------------------------------------------------------
+Vendor master report
+--------------------------------------------------------------------------------------------
+*&---------------------------------------------------------------------*
+*& Report ZMM_VEN_MASTER_RPT
+*&---------------------------------------------------------------------*
+*&
+*&---------------------------------------------------------------------*
+*------------------------------------------------------------*
+*PROGRAM..........ZSD_CUST_MASTER_REPORT                     *
+*T-CODE...........ZSD                                        *
+*TITLE........Report for all customer master details display *
+*AUTHOR........... Yogindra Choukidar                        *
+*CODE REVIEWER....Avinash Devkar                     *
+*FUNCTIONAL.......Anand Hatkar [SD]                          *
+*DATE WRITTEN.....                                           *
+*============================================================*
+*PROGRAM TYPE.....Report for vendor master                     *
+*DEV.CLASS........ZSD                                        *
+*ChaRM Ticket No..6000001633                               *
+*Request No.......ECDK931790                                *
+*User ID   .......402167                                    *
+*LOGICAL DB.......                                           *
+*R/3 RELEASE......E.C.C 6.0 EHP 7                            *
+*------------------------------------------------------------*
+*&--------------------------------------------------------------------*
+*Sr. No.: 001     Date : 25.10.2024    Changed By : Avinash Devkar    *
+*Request Number : ECDK931925       Dev Tracker No :6000001654        *
+*Brief Description : 402167-25.10.2024-ECDK931925-6000001654-bug fixing
+*&--------------------------------------------------------------------*
+*&--------------------------------------------------------------------*
+*Sr. No.: 002     Date : 31.07.2025   Changed By : Avinash Devkar    *
+*Request Number : ECDK932773       Dev Tracker No :6000001789        *
+*Brief Description : 402167-31.07.2025-ECDK932773-6000001789-audit point
+*&--------------------------------------------------------------------*
+REPORT zmm_ven_master_rpt.
+TABLES sscrfields.
+*start insert 402167-31.07.2025-ECDK932773-6000001789-audit point
+TYPES: BEGIN OF ty_final10,
+         businesspartner TYPE bu_partner,    " from IBPSUPPLIER
+         lifnr           TYPE lifnr,         " vendor code from LFA1
+         sortl           TYPE sortl,         " search term
+         name1           TYPE name1_gp,         " vendor name
+         str_suppl1      TYPE ad_strspp1,    " address supplementary 1
+         str_suppl2      TYPE ad_strspp2,    " address supplementary 2
+         post_code1      TYPE ad_pstcd1,     " postal code
+         city1           TYPE ad_city1,      " city
+         regio           TYPE regio,         " region
+         stcd3           TYPE stcd3,         " GST number
+         j_1ipanno       TYPE j_1ipanno,     " PAN number
+         bankl           TYPE bankl,         " bank key
+         bankn           TYPE bankn,         " bank account number
+       END OF ty_final10.
+
+
+TYPES : BEGIN OF ty_final11,
+          businesspartner TYPE bu_partner,    " from IBPSUPPLIER
+          lifnr           TYPE lifnr,         " vendor code from LFA1
+          name1           TYPE name1_gp,         " vendor name
+          pstlz           TYPE pstlz,     " postal code
+          stcd3           TYPE stcd3,         " GST number
+        END OF ty_final11.
+
+TYPES : BEGIN OF ty_final_11,
+          businesspartner TYPE bu_partner,    " from IBPSUPPLIER
+          lifnr           TYPE lifnr,         " vendor code from LFA1
+          name1           TYPE name1_gp,         " vendor name
+          pstlz           TYPE pstlz,     " postal code
+          stcd3           TYPE stcd3,         " GST number
+          str_suppl1      TYPE ad_strspp1,    " address supplementary 1
+          str_suppl2      TYPE ad_strspp2,    " address supplementary 2
+        END OF ty_final_11.
+
+DATA : gs_final11   TYPE ty_final11,
+       gt_final11_1 TYPE TABLE OF ty_final11.
+DATA : gs_final_111 TYPE ty_final_11,
+       gt_final_111 TYPE TABLE OF ty_final_11.
+
+TYPES: BEGIN OF ty_key,
+         name1      TYPE lfa1-name1,
+         stcd3      TYPE lfa1-stcd3,
+         j_1ipanno  TYPE lfa1-j_1ipanno,
+         str_suppl1 TYPE ad_strspp1,    " address supplementary 1
+         str_suppl2 TYPE ad_strspp2,    " address supplementary 2
+         post_code1 TYPE ad_pstcd1,     " postal code
+       END OF ty_key.
+
+TYPES: BEGIN OF ty_grouped,
+         key       TYPE ty_key,
+         lifnr     TYPE lfa1-lifnr,
+         bankl     TYPE lfbk-bankl,
+         bankn     TYPE lfbk-bankn,
+         full_data TYPE ty_final10,
+       END OF ty_grouped.
+
+DATA: lt_grouped    TYPE STANDARD TABLE OF ty_grouped,
+      lt_duplicates TYPE STANDARD TABLE OF ty_final10.
+*end insert 402167-31.07.2025-ECDK932773-6000001789-audit point
+TYPES : BEGIN OF ty_final6,
+          ibusinesspartner TYPE bu_partner,
+          ekorg            TYPE ekorg, "ins 402167-25.10.2024-ECDK931925-6000001654-bug fixing
+          lifnr            TYPE lifnr,
+          zterm            TYPE zterm,
+          vtext            TYPE vtext,
+          zterml           TYPE zterm,
+          vtextl           TYPE vtext,
+          sort1            TYPE lfa1-sortl,
+          name1            TYPE name1,
+        END OF ty_final6.
+
+DATA : gt_final6 TYPE TABLE OF ty_final6,
+       gs_final6 TYPE ty_final6.
+DATA : gv_lifnr TYPE lifnr,
+       gv_ccode TYPE bukrs,
+       gv_year  TYPE gjahr,
+       gv_ekorg TYPE ekorg,
+       gv_name  TYPE sortl,"ins 402167-25.10.2024-ECDK931925-6000001654-bug fixing
+       gv_date TYPE ERDAT.
+
+DATA : gt_dom    TYPE TABLE OF dd07v.
+SELECTION-SCREEN BEGIN OF BLOCK b1 WITH FRAME TITLE TEXT-001.
+  SELECT-OPTIONS : s_ccode FOR gv_ccode NO INTERVALS OBLIGATORY NO-EXTENSION DEFAULT '1100' MODIF ID m3,
+                   s_lifnr FOR  gv_lifnr MODIF ID m3,
+                   s_ekorg FOR  gv_ekorg NO INTERVALS NO-EXTENSION MODIF ID m3 DEFAULT '1000',
+                   s_sortl FOR gv_name MODIF ID m2, "ins 402167-25.10.2024-ECDK931925-6000001654-bug fixing
+                   s_date  for gv_date MODIF ID m4.
+SELECTION-SCREEN END OF BLOCK b1.
+PARAMETERS : P_chk AS CHECKBOX USER-COMMAND cl.
+SELECTION-SCREEN BEGIN OF BLOCK b2 WITH FRAME TITLE TEXT-002.
+  SELECTION-SCREEN BEGIN OF LINE.
+    PARAMETERS : p_rd1 RADIOBUTTON GROUP rad1 MODIF ID m1.
+    SELECTION-SCREEN COMMENT 4(75) TEXT-rd1 MODIF ID m1.
+  SELECTION-SCREEN END OF LINE.
+
+  SELECTION-SCREEN BEGIN OF LINE.
+    PARAMETERS :            p_rd2 RADIOBUTTON GROUP rad1 MODIF ID m1.
+    SELECTION-SCREEN COMMENT 4(75) TEXT-rd2 MODIF ID m1.
+  SELECTION-SCREEN END OF LINE.
+
+  SELECTION-SCREEN BEGIN OF LINE.
+    PARAMETERS :          p_rd3 RADIOBUTTON GROUP rad1 MODIF ID m1.
+    SELECTION-SCREEN COMMENT 4(75) TEXT-rd3 MODIF ID m1.
+  SELECTION-SCREEN END OF LINE.
+
+  SELECTION-SCREEN BEGIN OF LINE.
+    PARAMETERS :         p_rd4 RADIOBUTTON GROUP rad1 MODIF ID m1.
+    SELECTION-SCREEN COMMENT 4(75) TEXT-rd4 MODIF ID m1.
+  SELECTION-SCREEN END OF LINE.
+
+  SELECTION-SCREEN BEGIN OF LINE.
+    PARAMETERS :           p_rd5 RADIOBUTTON GROUP rad1 MODIF ID m1.
+    SELECTION-SCREEN COMMENT 4(75) TEXT-rd5 MODIF ID m1.
+  SELECTION-SCREEN END OF LINE.
+
+  SELECTION-SCREEN BEGIN OF LINE.
+    PARAMETERS :            p_rd6 RADIOBUTTON GROUP rad1 MODIF ID m1.
+    SELECTION-SCREEN COMMENT 4(75) TEXT-rd6 MODIF ID m1.
+  SELECTION-SCREEN END OF LINE.
+  SELECTION-SCREEN BEGIN OF LINE.
+    PARAMETERS :            p_rd7 RADIOBUTTON GROUP rad1 MODIF ID m1.
+    SELECTION-SCREEN COMMENT 4(75) TEXT-rd7 MODIF ID m1.
+  SELECTION-SCREEN END OF LINE.
+*start insert 402167-31.07.2025-ECDK932773-6000001789-audit point
+  SELECTION-SCREEN BEGIN OF LINE.
+    PARAMETERS :            p_rd8 RADIOBUTTON GROUP rad1 MODIF ID m1.
+    SELECTION-SCREEN COMMENT 4(75) TEXT-rd8 MODIF ID m1.
+  SELECTION-SCREEN END OF LINE.
+  SELECTION-SCREEN BEGIN OF LINE.
+    PARAMETERS :            p_rd9 RADIOBUTTON GROUP rad1 MODIF ID m1.
+    SELECTION-SCREEN COMMENT 4(75) TEXT-rd9 MODIF ID m1.
+  SELECTION-SCREEN END OF LINE.
+  SELECTION-SCREEN BEGIN OF LINE.
+    PARAMETERS :            p_rd10 RADIOBUTTON GROUP rad1 MODIF ID m1.
+    SELECTION-SCREEN COMMENT 4(75) TEXT-010 MODIF ID m1.
+  SELECTION-SCREEN END OF LINE.
+  SELECTION-SCREEN BEGIN OF LINE.
+    PARAMETERS :            p_rd11 RADIOBUTTON GROUP rad1 MODIF ID m1.
+    SELECTION-SCREEN COMMENT 4(79) TEXT-011 MODIF ID m1.
+  SELECTION-SCREEN END OF LINE.
+*end insert 402167-31.07.2025-ECDK932773-6000001789-audit point
+SELECTION-SCREEN END OF BLOCK b2.
+
+
+
+AT SELECTION-SCREEN OUTPUT.
+
+  IF p_chk = ' '.
+    LOOP AT SCREEN.
+      IF screen-group1 = 'M1' OR screen-group1 = 'MOD' OR screen-group1 = 'M2' .
+        screen-active = 0.
+      ENDIF.
+      MODIFY SCREEN.
+    ENDLOOP.
+  ELSE.
+    IF p_rd10 = 'X' OR p_rd9 = 'X' OR p_rd11 = 'X'. "ins 402167-31.07.2025-ECDK932773-6000001789-audit point
+      LOOP AT SCREEN.
+        IF screen-group1 = 'M2' OR screen-group1 = 'M1' .
+          screen-active = 1.
+        ENDIF.
+        MODIFY SCREEN.
+      ENDLOOP.
+      LOOP AT SCREEN.
+        IF screen-group1 = 'M3' or screen-group1 = 'M4' .
+          screen-active = 0.
+        ENDIF.
+        MODIFY SCREEN.
+      ENDLOOP.
+
+    ELSE.
+
+      LOOP AT SCREEN.
+        IF screen-group1 = 'M1'.
+          screen-active = 1.
+        ENDIF.
+        MODIFY SCREEN.
+      ENDLOOP.
+
+      LOOP AT SCREEN.
+        IF screen-group1 = 'M2' or screen-group1 = 'M4' .
+          screen-active = 0.
+        ENDIF.
+        MODIFY SCREEN.
+      ENDLOOP.
+    ENDIF.
+  ENDIF.
+
+AT SELECTION-SCREEN.
+
+
+  IF sscrfields-ucomm = 'ONLI'.
+    IF s_ccode IS NOT INITIAL.
+*start insert by 402167-25.10.2024-ECDK931925-6000001654-bug fixing
+      IF s_ekorg IS NOT INITIAL.
+        IF s_ccode-low = '1100' AND s_ekorg-low NE '1000'.
+          MESSAGE 'Purch Org should be 1000 Only' TYPE 'E'.
+        ELSEIF s_ccode-low = '1600' AND s_ekorg-low NE '6000'.
+          MESSAGE 'Purch Org should be 6000 Only' TYPE 'E'.
+        ENDIF.
+      ELSE.
+        MESSAGE 'purch org should not be blank' TYPE 'E'.
+      ENDIF.
+*End insert by 402167-25.10.2024-ECDK931925-6000001654-bug fixing
+      SELECT SINGLE 'X' FROM t001 WHERE bukrs = @s_ccode-low INTO @DATA(ls_check).
+      IF sy-subrc NE 0.
+        MESSAGE 'Please enter valid company code ' TYPE 'E'.
+      ENDIF.
+    ENDIF.
+  ENDIF.
+
+START-OF-SELECTION.
+
+  IF p_chk = 'X'.
+    IF p_rd1 = 'X'. "GSTIN Same & vendor Diff
+
+
+      SELECT FROM lfa1 AS l
+        INNER JOIN lfm1 AS lf
+        ON lf~lifnr = l~lifnr  "ins 402167-25.10.2024-ECDK931925-6000001654-bug fixing
+       INNER JOIN lfb1 AS lb
+     ON lb~lifnr = l~lifnr
+     INNER JOIN ibpsupplier AS i
+     ON i~supplier = l~lifnr
+     INNER JOIN adrc AS a
+     ON a~addrnumber = l~adrnr
+            INNER JOIN  t005u AS t
+         ON t~bland = a~region
+         AND t~spras = 'E'
+         AND t~land1 = l~land1
+   FIELDS DISTINCT i~businesspartner, l~lifnr,lf~ekorg, l~stcd3,l~sortl,l~name1, a~str_suppl1, a~str_suppl2,a~city1,a~post_code1,a~region,
+  t~bezei, a~country, l~nodel,l~sperr,l~sperm,l~loevm,l~sperq,lb~akont, lb~fdgrv,l~j_1ipanno, l~ktokk
+   WHERE l~lifnr IN @s_lifnr
+           AND lb~bukrs IN @s_ccode
+   AND l~ktokk NOT IN ( 'Z004','Z010','Z011' )
+     AND   l~stcd3 <> ' '
+     AND  lf~ekorg IN @s_ekorg
+      INTO TABLE @DATA(gt_final1).
+      SORT gt_final1 BY stcd3 ASCENDING.
+
+      LOOP AT gt_final1 INTO DATA(gs_final1).
+        SELECT SINGLE COUNT(*)
+           FROM @gt_final1 AS a
+           WHERE stcd3 = @gs_final1-stcd3
+        INTO @DATA(lv_count2).
+
+        IF lv_count2 > 1.
+        ELSE.
+          DELETE gt_final1 INDEX sy-tabix.
+        ENDIF.
+      ENDLOOP.
+      DELETE ADJACENT DUPLICATES FROM gt_final1 COMPARING lifnr stcd3.
+      SORT gt_final1 BY stcd3 ASCENDING.
+    ELSEIF p_rd2 = 'X'. "Same Pan & diff Name
+
+      SELECT FROM lfa1 AS l
+            INNER JOIN lfm1 AS lf
+            ON lf~lifnr = l~lifnr  "ins 402167-25.10.2024-ECDK931925-6000001654-bug fixing
+            INNER JOIN lfb1 AS lb
+            ON lb~lifnr = l~lifnr
+            INNER JOIN ibpsupplier AS i
+            ON i~supplier = l~lifnr
+            LEFT JOIN  dfkkbptaxnum AS d
+            ON d~partner = i~businesspartner
+            INNER JOIN adrc AS a
+            ON a~addrnumber = l~adrnr
+                 INNER JOIN  t005u AS t
+           ON t~bland = a~region
+           AND t~spras = 'E'
+           AND t~land1 = l~land1
+          FIELDS DISTINCT i~businesspartner, lf~ekorg, l~lifnr,l~j_1ipanno,l~stcd3,l~sortl,l~name1, a~str_suppl1, a~str_suppl2,a~city1,a~post_code1,a~region,
+         t~bezei, a~country,l~nodel,l~sperr,l~sperm,l~loevm,l~sperq,lb~akont,lb~fdgrv,l~ktokk
+          WHERE l~lifnr IN @s_lifnr
+          AND lb~bukrs IN @s_ccode
+          AND l~ktokk NOT IN ( 'Z004','Z010','Z011' )
+         AND  lf~ekorg IN @s_ekorg "ins 402167-25.10.2024-ECDK931925-6000001654-bug fixing
+      INTO TABLE @DATA(gt_final2).
+      SORT gt_final2 BY j_1ipanno.
+      LOOP AT gt_final2 INTO DATA(gs_final2).
+        SELECT SINGLE COUNT(*)
+            FROM @gt_final2 AS a
+            WHERE j_1ipanno = @gs_final2-j_1ipanno
+            AND name1 <> @gs_final2-name1
+        INTO @DATA(lv_count1).
+
+        IF lv_count1 > 1.
+        ELSE.
+          DELETE gt_final2 INDEX sy-tabix.
+        ENDIF.
+      ENDLOOP.
+
+    ELSEIF p_rd3 = 'X'.      "Vendor same name & diff PAN
+
+      SELECT FROM lfa1 AS l
+             INNER JOIN lfm1 AS lf
+             ON lf~lifnr = l~lifnr  "ins 402167-25.10.2024-ECDK931925-6000001654-bug fixing
+             INNER JOIN ibpsupplier AS i
+             ON i~supplier = l~lifnr
+             LEFT JOIN  dfkkbptaxnum AS d
+             ON d~partner = i~businesspartner
+             INNER JOIN adrc AS a
+             ON a~addrnumber = l~adrnr
+            INNER JOIN  t005u AS t
+            ON t~bland = a~region
+            AND t~spras = 'E'
+            AND t~land1 = l~land1
+           FIELDS i~businesspartner,lf~ekorg, l~lifnr,l~j_1ipanno, l~name1,l~sortl, l~stcd3, a~str_suppl1, a~str_suppl2,a~city1,a~post_code1,a~region, t~bezei,
+           a~country,l~nodel,l~sperr,l~sperm,l~loevm,l~sperq
+           WHERE l~lifnr IN @s_lifnr
+           AND l~ktokk NOT IN ( 'Z004','Z010','Z011' )
+           AND l~j_1ipanno <> ' '
+           AND  lf~ekorg IN @s_ekorg "ins 402167-25.10.2024-ECDK931925-6000001654-bug fixing
+      INTO TABLE @DATA(gt_final3).
+
+      SORT gt_final3 BY name1 j_1ipanno.
+      DELETE ADJACENT DUPLICATES FROM gt_final3 COMPARING name1 j_1ipanno.
+      LOOP AT gt_final3 INTO DATA(gs_final3).
+        SELECT SINGLE COUNT(*)
+          FROM @gt_final3 AS a
+          WHERE name1 = @gs_final3-name1
+         AND j_1ipanno <> @gs_final2-j_1ipanno
+        INTO @DATA(lv_count).
+
+        IF lv_count > 1.
+        ELSE.
+          DELETE gt_final3 INDEX sy-tabix.
+        ENDIF.
+      ENDLOOP.
+      SORT gt_final3 BY name1 ASCENDING.
+    ELSEIF P_rd4 = 'X'. "Accuracy of GSTIN Codes
+
+      CALL FUNCTION 'DD_DOMVALUES_GET'
+        EXPORTING
+          domname        = 'J_1IGTAXKD'
+          text           = 'X'
+          langu          = sy-langu
+        TABLES
+          dd07v_tab      = gt_dom
+        EXCEPTIONS
+          wrong_textflag = 1
+          OTHERS         = 2.
+      IF sy-subrc <> 0.
+
+      ENDIF.
+
+      SELECT FROM lfa1 AS l
+            INNER JOIN lfm1 AS lf
+            ON lf~lifnr = l~lifnr  "ins 402167-25.10.2024-ECDK931925-6000001654-bug fixing
+            INNER JOIN ibpsupplier AS i
+            ON i~supplier = l~lifnr
+            INNER JOIN adrc AS a
+            ON a~addrnumber = l~adrnr
+             INNER JOIN  t005u AS t
+           ON t~bland = a~region
+           AND t~spras = 'E'
+           AND t~land1 = l~land1
+          FIELDS DISTINCT i~businesspartner,lf~ekorg, l~lifnr,l~name1,a~region, t~bezei,  l~stcd3,l~j_1ipanno,t~bezei AS code,a~street AS name, l~ven_class,  l~name4,
+        l~sortl, a~str_suppl1, a~str_suppl2,a~city1,a~post_code1,
+         a~country,l~nodel,l~sperr,l~sperm,l~loevm,l~sperq
+          WHERE l~lifnr IN @s_lifnr
+        AND l~j_1ipanno NE ' '
+          AND l~ktokk NOT IN ( 'Z004','Z010','Z011' )
+         AND  lf~ekorg IN @s_ekorg "ins 402167-25.10.2024-ECDK931925-6000001654-bug fixing
+      INTO TABLE @DATA(gt_final4).
+
+
+      SELECT * FROM zfi_statecd
+        WHERE land1 = 'IN'
+        INTO TABLE @DATA(gt_code).
+
+      SELECT * FROM t005u
+       WHERE land1 = 'IN'  "added 402167-25.10.2024-ECDK931925-6000001654-bug fixing
+        AND spras = 'E'
+        INTO TABLE @DATA(gt_diff).
+      LOOP AT Gt_final4 ASSIGNING FIELD-SYMBOL(<gfs_final4>).
+        CLEAR : <gfs_final4>-name, <gfs_final4>-code.
+        DATA(lv_index) = sy-tabix.
+        READ TABLE gt_dom INTO DATA(gs_final) WITH KEY domvalue_l = <gfs_final4>-ven_class.
+        IF sy-subrc = 0.
+          <gfs_final4>-name4 = gs_final-ddtext.
+        ELSE.
+          CLEAR <gfs_final4>-name4.
+        ENDIF.
+        READ TABLE gt_code INTO DATA(gs_code) WITH KEY bland = <gfs_final4>-region.
+        DATA(lv_lenth) = strlen( <gfs_final4>-stcd3 ).
+        IF  <gfs_final4>-stcd3 IS NOT INITIAL.
+          IF lv_lenth EQ '15'.
+            IF <gfs_final4>-stcd3+0(2) EQ gs_code-regio AND <gfs_final4>-stcd3+2(10) EQ <gfs_final4>-j_1ipanno
+              AND <gfs_final4>-stcd3+12(1) CA '0123456789' AND <gfs_final4>-stcd3+13(1) = 'Z'
+              AND ( <gfs_final4>-stcd3+14(1) CA '0123456789' OR <gfs_final4>-stcd3+14(1) CA sy-abcde ).
+
+              DELETE gt_final4 INDEX lv_index.
+            ELSE.
+              READ TABLE gt_code INTO DATA(gs_code1) WITH KEY regio = <gfs_final4>-stcd3+0(2).
+              IF sy-subrc = 0.
+                READ TABLE gt_diff INTO DATA(ls_diff) WITH KEY bland = gs_code1-bland.
+                IF sy-subrc = 0.
+                  <gfs_final4>-code = |{ <gfs_final4>-stcd3+0(2) }-{ ls_diff-bezei }|.
+                ENDIF.
+              ENDIF.
+*start insert 402167-25.10.2024-ECDK931925-6000001654-bug fixing
+              IF <gfs_final4>-stcd3+0(2) NE gs_code-regio. "addded by avinash
+                <gfs_final4>-name = |1st 2 digits is not as per the GST State code wise|.
+              ELSEIF <gfs_final4>-stcd3+2(10) NE <gfs_final4>-j_1ipanno.
+                <gfs_final4>-name = 'This characters from 3rd to12th is not as per the PAN number'.
+              ELSEIF <gfs_final4>-stcd3+12(1) NA '0123456789'.
+                <gfs_final4>-name = ' The 13th Digit is supposed to be Number'.
+              ELSEIF <gfs_final4>-stcd3+13(1) NE 'Z'.
+                <gfs_final4>-name = '14th digit supposed to be Z only'.
+              ELSEIF <gfs_final4>-stcd3+14(1) NA '0123456789' OR <gfs_final4>-stcd3+14(1) NA sy-abcde .
+                <gfs_final4>-name = '15th digit can be Alpha-Numeric'.
+              ENDIF.
+*end insert 402167-25.10.2024-ECDK931925-6000001654-bug fixing
+            ENDIF.
+          ENDIF.
+        ENDIF.
+      ENDLOOP.
+      SORT gt_final4 BY lifnr ASCENDING.
+
+
+    ELSEIF p_rd5 = 'X'. " payment term history
+
+      SELECT FROM lfa1 AS l
+        INNER JOIN lfm1 AS lk
+        ON lk~lifnr = l~lifnr  "ins 402167-25.10.2024-ECDK931925-6000001654-bug fixing
+        INNER JOIN ibpsupplier AS i
+       ON i~supplier = l~lifnr
+       INNER JOIN cdhdr AS c
+       ON c~objectid = l~lifnr
+       AND c~objectclas = 'KRED'
+       INNER JOIN  cdpos AS cd
+       ON cd~changenr = c~changenr
+        AND cd~fname = 'ZTERM'
+       INNER JOIN lfm1 AS lf
+        ON lf~lifnr = l~lifnr
+         INNER JOIN tvzbt AS ts
+       ON ts~zterm = cd~value_new
+       AND ts~spras = 'E'
+       INNER JOIN tvzbt AS tn
+       ON tn~zterm = cd~value_old
+       AND tn~spras = 'E'
+       FIELDS DISTINCT i~businesspartner,lk~ekorg, l~lifnr, l~name1, cd~value_new,ts~vtext,c~username, c~udate, c~utime,cd~value_old,tn~vtext AS vtext1
+       WHERE l~lifnr IN @s_lifnr
+        AND lf~ekorg EQ '1000'
+          AND l~ktokk NOT IN ( 'Z004','Z010','Z011' )
+        AND c~udate GE '20230101'
+         AND  lk~ekorg IN @s_ekorg "ins 402167-25.10.2024-ECDK931925-6000001654-bug fixing
+      INTO TABLE @DATA(gt_final5).
+      SORT gt_final5 BY lifnr udate utime ASCENDING.
+
+
+    ELSEIF p_rd6 = 'X'. " vendor with immediate paymnet term
+
+      SELECT FROM lfa1 AS l
+        INNER JOIN lfm1 AS lf
+        ON lf~lifnr = l~lifnr
+         INNER JOIN ibpsupplier AS i
+         ON i~supplier = l~lifnr
+        FIELDS i~businesspartner,lf~ekorg, l~lifnr, l~sortl,l~name1
+         WHERE l~lifnr IN @s_lifnr
+       AND l~ktokk NOT IN ( 'Z004','Z010','Z011' )
+         AND  lf~ekorg IN @s_ekorg
+        INTO TABLE @DATA(gt_purt).
+
+
+      SELECT FROM lfa1 AS l
+      INNER JOIN lfb1 AS lb
+      ON lb~lifnr = l~lifnr
+       AND  lb~zterm IN  ( '0001','Z170','Z171','Z177' )
+       LEFT JOIN tvzbt AS ts
+     ON ts~zterm = lb~zterm
+     AND ts~spras = 'E'
+    FIELDS l~lifnr, lb~zterm,ts~vtext
+     WHERE l~lifnr IN @s_lifnr
+      AND l~ktokk NOT IN ( 'Z004','Z010','Z011' )
+         AND lb~bukrs IN @s_ccode
+    INTO TABLE @DATA(gt_purt1).
+
+      SELECT FROM lfa1 AS l
+      INNER JOIN lfm1 AS lb
+      ON lb~lifnr = l~lifnr
+       AND  lb~zterm IN  ( '0001','Z170','Z171','Z177' )
+       LEFT JOIN tvzbt AS ts
+     ON ts~zterm = lb~zterm
+     AND ts~spras = 'E'
+    FIELDS l~lifnr, lb~zterm,ts~vtext
+     WHERE l~lifnr IN @s_lifnr
+      AND l~ktokk NOT IN ( 'Z004','Z010','Z011' )
+
+    INTO TABLE @DATA(gt_purt2).
+
+      SELECT FROM lfa1 AS l
+      INNER JOIN lfb1 AS lb
+      ON lb~lifnr = l~lifnr
+       AND  lb~zterm  NOT IN  ( '0001','Z170','Z171','Z177' )
+       LEFT JOIN tvzbt AS ts
+     ON ts~zterm = lb~zterm
+     AND ts~spras = 'E'
+    FIELDS l~lifnr, lb~zterm,ts~vtext
+     WHERE l~lifnr IN @s_lifnr
+      AND l~ktokk NOT IN ( 'Z004','Z010','Z011' )
+         AND lb~bukrs IN @s_ccode
+    INTO TABLE @DATA(gt_cust1).
+
+      SELECT FROM lfa1 AS l
+      INNER JOIN lfm1 AS lb
+      ON lb~lifnr = l~lifnr
+       AND  lb~zterm NOT IN  ( '0001','Z170','Z171','Z177' )
+       LEFT JOIN tvzbt AS ts
+     ON ts~zterm = lb~zterm
+     AND ts~spras = 'E'
+    FIELDS l~lifnr, lb~zterm,ts~vtext
+     WHERE l~lifnr IN @s_lifnr
+      AND l~ktokk NOT IN ( 'Z004','Z010','Z011' )
+
+    INTO TABLE @DATA(gt_cust2).
+
+
+
+      LOOP AT gt_purt INTO DATA(gs_purt6).
+        gs_final6-ibusinesspartner = gs_purt6-businesspartner.
+        gs_final6-ekorg            = gs_purt6-ekorg. "added 402167-25.10.2024-ECDK931925-6000001654-bug fixing
+        gs_final6-lifnr            = gs_purt6-lifnr.
+        gs_final6-name1            = gs_purt6-name1.
+        gs_final6-sort1             = gs_purt6-sortl.
+
+        READ TABLE gt_purt1 INTO DATA(ls_purt1) WITH KEY lifnr = gs_purt6-lifnr.
+        IF sy-subrc = 0.
+          gs_final6-zterm             = ls_purt1-zterm.
+          gs_final6-vtext             = ls_purt1-vtext.
+        ELSE.
+          DATA(gv_flag) = 'X'.
+          READ TABLE gt_cust1 INTO DATA(ls_cust1) WITH KEY lifnr = gs_purt6-lifnr.
+          gs_final6-zterm             = ls_cust1-zterm.
+          gs_final6-vtext             = ls_cust1-vtext.
+        ENDIF.
+
+        READ TABLE gt_purt2 INTO DATA(ls_purt2) WITH KEY lifnr = gs_purt6-lifnr.
+        IF sy-subrc = 0.
+          gs_final6-zterml             = ls_purt2-zterm.
+          gs_final6-vtextl             = ls_purt2-vtext.
+        ELSE.
+          IF gv_flag = 'X'.
+            CONTINUE.
+          ELSE.
+            READ TABLE gt_cust2 INTO DATA(ls_cust2) WITH KEY lifnr = gs_purt6-lifnr.
+            gs_final6-zterml             = ls_cust2-zterm.
+            gs_final6-vtextl             = ls_cust2-vtext.
+          ENDIF.
+        ENDIF.
+        APPEND gs_final6 TO gt_final6.
+        CLEAR gs_final6.
+      ENDLOOP.
+      DELETE ADJACENT DUPLICATES FROM gt_final6 COMPARING ALL FIELDS.
+
+    ELSEIF P_rd7 = 'X'.
+
+
+      SELECT FROM lfa1 AS l
+      INNER JOIN lfm1 AS lk
+       ON lk~lifnr = l~lifnr
+      INNER JOIN ibpsupplier AS i
+       ON i~supplier = l~lifnr
+      INNER JOIN lfb1 AS lb
+      ON lb~lifnr = l~lifnr
+     LEFT JOIN tvzbt AS ts
+     ON ts~zterm = lb~zterm
+     AND ts~spras = 'E'
+      INNER JOIN lfm1 AS lf
+      ON lf~lifnr = l~lifnr
+        AND lf~zterm NE lb~zterm
+     LEFT JOIN tvzbt AS ts1
+     ON ts1~zterm EQ lf~zterm
+     AND ts1~spras = 'E'
+     LEFT JOIN t001 AS t
+     ON t~bukrs = lb~bukrs
+      LEFT JOIN t024e AS te
+      ON te~ekorg = lf~ekorg
+      FIELDS DISTINCT i~businesspartner,lb~bukrs,t~butxt, lf~ekorg, te~ekotx,l~lifnr, l~name1, lb~zterm, ts~vtext, lf~zterm AS zterm1, ts1~vtext AS vtext1
+       WHERE l~lifnr IN @s_lifnr
+       AND lb~bukrs IN @s_ccode
+         AND l~ktokk NOT IN ( 'Z004','Z010','Z011' )
+        AND  lf~ekorg IN @s_ekorg "added by402167-25.10.2024-ECDK931925-6000001654-bug fixing
+      INTO TABLE @DATA(gt_final8).
+
+*start insert 402167-31.07.2025-ECDK932773-6000001789-audit pointc
+    ELSEIF P_rd8 = 'X'.
+
+      SELECT FROM zfi_ssi AS z
+            INNER JOIN ibpsupplier AS i
+        ON i~supplier = z~lifnr
+        INNER JOIN lfa1 AS l
+        ON l~lifnr = z~lifnr
+        INNER JOIN lfb1 AS lb
+        ON lb~lifnr = z~lifnr
+        INNER JOIN lfm1 AS lm
+        ON lm~lifnr = z~lifnr
+        FIELDS DISTINCT i~businesspartner, z~lifnr, l~name1, z~regn, z~idate,z~dflag,z~ddate,z~kbetr,z~msmec,z~major_act,
+                        z~msme_year, z~datuv, z~datub, lb~zterm, lm~zterm AS zterm1
+         WHERE z~lifnr IN @s_lifnr
+      AND   lm~ekorg IN @s_ekorg
+        AND lb~bukrs IN @s_ccode
+         INTO TABLE @DATA(gt_final9).
+
+    ELSEIF p_rd9 = 'X'.
+
+      SELECT FROM lfa1 AS l
+                   INNER JOIN ibpsupplier AS i
+       ON i~supplier = l~lifnr
+        INNER JOIN adrc AS a
+        ON a~addrnumber = l~adrnr
+        INNER JOIN lfbk AS lf
+        ON lf~lifnr = l~lifnr
+      FIELDS DISTINCT i~businesspartner, l~lifnr, l~sortl,l~name1, a~str_suppl1, a~str_suppl2,a~post_code1,
+         a~city1, l~regio, l~stcd3, l~j_1ipanno, lf~bankl, lf~bankn
+        WHERE l~lifnr IN @s_lifnr
+        AND l~sortl IN @s_sortl
+        ORDER BY l~name1 ASCENDING
+        INTO TABLE @DATA(gt_final10).
+      DATA(gt_final10_1) = gt_final10.
+      CLEAR gt_final10_1.
+      " Step 1: Group entries by PAN + GST + NAME1
+      LOOP AT gt_final10 INTO DATA(ls_data).
+        DATA(ls_key) = VALUE ty_key(
+          name1     = ls_data-name1
+          stcd3     = ls_data-stcd3
+          j_1ipanno = ls_data-j_1ipanno
+            str_suppl1  = ls_data-str_suppl1
+               str_suppl2  = ls_data-str_suppl2
+               post_code1   = ls_data-post_code1
+
+
+
+
+        ).
+
+        APPEND VALUE ty_grouped( key       = ls_key
+                                 lifnr     = ls_data-lifnr
+                                 bankl     = ls_data-bankl
+                                 bankn     = ls_data-bankn
+                                 full_data = ls_data ) TO lt_grouped.
+      ENDLOOP.
+
+      " Step 2: Sort for comparison
+      SORT lt_grouped BY key-name1 key-stcd3 key-j_1ipanno.
+
+      " Step 3: Compare within groups
+      DATA: lt_temp        TYPE STANDARD TABLE OF ty_grouped,
+            lv_current_key TYPE ty_key.
+
+      LOOP AT lt_grouped INTO DATA(ls_grp).
+        AT NEW key.
+          CLEAR lt_temp.
+          lv_current_key = ls_grp-key.
+        ENDAT.
+
+        APPEND ls_grp TO lt_temp.
+        CLEAR ls_grp.
+
+        AT END OF key.
+          " Check if more than 1 vendor with different LIFNR and bank details
+          DATA: lt_lifnr     TYPE SORTED TABLE OF lfa1-lifnr WITH UNIQUE KEY table_line,
+                lt_bankcombo TYPE HASHED TABLE OF  string WITH UNIQUE KEY table_line.
+
+          LOOP AT lt_temp INTO DATA(ls_check).
+            INSERT ls_check-lifnr INTO TABLE lt_lifnr.
+
+            DATA(lv_bankcombo) = |{ ls_check-bankl }-{ ls_check-bankn }|.
+            INSERT lv_bankcombo INTO TABLE lt_bankcombo.
+          ENDLOOP.
+
+          IF lines( lt_lifnr ) > 1 AND lines( lt_bankcombo ) > 1.
+            LOOP AT lt_temp INTO DATA(ls_dup).
+              APPEND ls_dup-full_data TO lt_duplicates.
+            ENDLOOP.
+
+
+          ENDIF.
+          CLEAR : lt_temp, lt_lifnr, lt_bankcombo,ls_dup-full_data.
+        ENDAT.
+      ENDLOOP.
+      DELETE ADJACENT DUPLICATES FROM lt_duplicates COMPARING ALL FIELDS.
+
+    ELSEIF p_rd10 = 'X'.
+
+      SELECT FROM lfa1 AS l
+     INNER JOIN ibpsupplier AS i
+      ON i~supplier = l~lifnr
+      FIELDS i~businesspartner, l~lifnr, l~name1,l~pstlz,l~stcd3
+        WHERE l~lifnr IN @s_lifnr
+        AND l~sortl IN @s_sortl
+        AND l~lifnr NOT IN ( 'E*' , 'R%' )
+        ORDER BY l~name1 ASCENDING
+        INTO TABLE @DATA(gt_final11).
+
+
+
+      LOOP AT gt_final11 INTO DATA(ls_final).
+
+        IF ls_final-name1 = gs_final11-name1 AND ls_final-pstlz = gs_final11-pstlz AND ls_final-stcd3 = gs_final11-stcd3.
+          CONDENSE ls_final-pstlz.
+          APPEND ls_final TO gt_final11_1.
+          APPEND gs_final11 TO gt_final11_1.
+        ENDIF.
+        gs_final11 = CORRESPONDING #( ls_final ).
+        CLEAR ls_final.
+      ENDLOOP.
+
+      DELETE ADJACENT DUPLICATES FROM gt_final11_1 COMPARING ALL FIELDS.
+
+
+
+    ELSEIF P_rd11 = 'X'.
+
+      SELECT FROM lfa1 AS l
+   INNER JOIN ibpsupplier AS i
+    ON i~supplier = l~lifnr
+                INNER JOIN adrc AS a
+      ON a~addrnumber = l~adrnr
+    FIELDS i~businesspartner, l~lifnr, l~name1,l~pstlz,l~stcd3,a~str_suppl1, a~str_suppl2
+      WHERE l~lifnr IN @s_lifnr
+      AND l~sortl IN @s_sortl
+      AND l~lifnr NOT IN ( 'E%*' , 'R%' )
+      ORDER BY l~name1 ASCENDING
+      INTO TABLE @DATA(gt_final_11).
+
+      LOOP AT gt_final_11 INTO DATA(ls_final_1).
+
+        IF ls_final_1-name1 = gs_final_111-name1 AND ls_final_1-pstlz = gs_final_111-pstlz
+         AND ls_final_1-stcd3 = gs_final_111-stcd3 AND ls_final_1-str_suppl1 = gs_final_111-str_suppl1
+          AND ls_final_1-str_suppl1 = gs_final_111-str_suppl2.
+          APPEND ls_final_1 TO gt_final_111.
+          APPEND gs_final_111 TO gt_final_111.
+        ENDIF.
+        gs_final_111 = CORRESPONDING #( ls_final_1 ).
+        CLEAR ls_final.
+      ENDLOOP.
+
+      DELETE ADJACENT DUPLICATES FROM gt_final_111 COMPARING ALL FIELDS.
+
+    ENDIF.
+*end insert 402167-31.07.2025-ECDK932773-6000001789-audit point
+
+  ELSE.
+*start replace by 402167-25.10.2024-ECDK931925-6000001654-bug fixing
+*    SELECT FROM lfa1 AS l
+*       INNER JOIN lfm1 AS lk
+*       ON lk~lifnr = l~lifnr
+*       INNER JOIN lfb1 AS lb
+*       ON lb~lifnr = l~lifnr
+*       INNER JOIN ibpsupplier AS i
+*       ON i~supplier = l~lifnr
+*       INNER JOIN  dfkkbptaxnum AS d
+*       ON d~partner = i~businesspartner
+*       INNER JOIN adrc AS a
+*       ON a~addrnumber = l~adrnr
+*       INNER JOIN  t005u AS t
+*       ON t~bland = a~region
+*       AND t~spras = 'E'
+*       AND t~land1 = l~land1
+*      INNER JOIN tvzbt AS ts
+*     ON ts~zterm = lb~zterm
+*     AND ts~spras = 'E'
+*     FIELDS DISTINCT i~businesspartner,lk~ekorg, l~lifnr, l~name1,l~stcd3,l~sortl, a~str_suppl1, a~str_suppl2,a~city1,a~post_code1,a~region,
+*    t~bezei, a~country, l~nodel,l~sperr,l~sperm,l~sperq,lb~zterm,ts~vtext, lb~akont, lb~fdgrv,l~j_1ipanno, l~ktokk
+*     WHERE l~lifnr IN @s_lifnr
+*     AND lb~bukrs IN @s_ccode
+*     AND l~ktokk NOT IN ( 'Z004','Z010','Z011' )
+*     AND  lk~ekorg IN @s_ekorg
+*    INTO TABLE @DATA(gt_final7).
+
+    SELECT FROM lfa1 AS l
+       LEFT JOIN lfm1 AS lk
+       ON lk~lifnr = l~lifnr
+       LEFT JOIN lfb1 AS lb
+       ON lb~lifnr = l~lifnr
+       LEFT JOIN ibpsupplier AS i
+       ON i~supplier = l~lifnr
+       LEFT JOIN  dfkkbptaxnum AS d
+       ON d~partner = i~businesspartner
+       LEFT JOIN adrc AS a
+       ON a~addrnumber = l~adrnr
+       LEFT JOIN  t005u AS t
+       ON t~bland = a~region
+       AND t~spras = 'E'
+       AND t~land1 = l~land1
+      LEFT JOIN tvzbt AS ts
+     ON ts~zterm = lb~zterm
+     AND ts~spras = 'E'
+     FIELDS DISTINCT i~businesspartner,lk~ekorg, l~lifnr, l~name1,l~stcd3,l~sortl, a~str_suppl1, a~str_suppl2,a~city1,a~post_code1,a~region,l~ernam,l~erdat,
+    t~bezei, a~country, l~nodel,l~sperr,l~sperm,l~sperq,lb~zterm,ts~vtext, lb~akont, lb~fdgrv,l~j_1ipanno, l~ktokk,l~zapp_dat,l~zapp_inv,l~ztcs_app,l~zturnover
+     WHERE l~lifnr IN @s_lifnr
+     AND lb~bukrs IN @s_ccode
+     AND l~ktokk NOT IN ( 'Z004','Z010','Z011' )
+     AND  lk~ekorg IN @s_ekorg
+     and  l~erdat in @s_date
+    INTO TABLE @DATA(gt_final7).
+*end replace 402167-25.10.2024-ECDK931925-6000001654-bug fixing
+  ENDIF.
+  PERFORM display_output.
+*&---------------------------------------------------------------------*
+*& Form display_output
+*&---------------------------------------------------------------------*
+*& text
+*&---------------------------------------------------------------------*
+*& -->  p1        text
+*& <--  p2        text
+*&---------------------------------------------------------------------*
+FORM display_output .
+  DATA: lo_gr_alv       TYPE REF TO cl_salv_table, " Variables for ALV properties
+        lo_gr_functions TYPE REF TO cl_salv_functions_list,
+        lo_layout       TYPE REF TO cl_salv_layout, " Variables for enabling Save button
+        lv_key          TYPE salv_s_layout_key,
+        lo_display      TYPE REF TO cl_salv_display_settings,
+        lo_aggrs        TYPE REF TO cl_salv_aggregations,
+        lo_cols         TYPE REF TO cl_salv_columns,
+        lo_column       TYPE REF TO cl_salv_column.
+  IF P_chk = 'X'.
+    IF p_rd1 = 'X'.
+
+      TRY.
+          CALL METHOD cl_salv_table=>factory
+            IMPORTING
+              r_salv_table = lo_gr_alv
+            CHANGING
+              t_table      = gt_final1.
+        CATCH cx_salv_msg.
+      ENDTRY.
+      lo_cols = lo_gr_alv->get_columns( ).
+      lo_cols->set_optimize( 'X' ).
+      lo_gr_functions = lo_gr_alv->get_functions( ).
+      lo_gr_functions->set_all( abap_true ).
+      lo_layout = lo_gr_alv->get_layout( ).
+      lv_key-report = sy-repid.
+      lo_layout->set_key( lv_key ).
+      lo_layout->set_save_restriction( if_salv_c_layout=>restrict_none ).
+      lo_layout->set_default( abap_true ).
+      lo_display = lo_gr_alv->get_display_settings( ).
+      lo_display->Set_list_header( TEXT-rd1 ).
+      lo_gr_alv->get_display_settings( )->set_striped_pattern( abap_true ).
+      lo_gr_alv->display( ).
+
+
+    ELSEIF p_rd2 = 'X'.
+      DELETE gt_final2 WHERE j_1ipanno = ' '.
+      SORT gt_final2 BY j_1ipanno.
+      TRY.
+          CALL METHOD cl_salv_table=>factory
+            IMPORTING
+              r_salv_table = lo_gr_alv
+            CHANGING
+              t_table      = gt_final2.
+        CATCH cx_salv_msg.
+      ENDTRY.
+      lo_cols = lo_gr_alv->get_columns( ).
+      lo_cols->set_optimize( 'X' ).
+      lo_gr_functions = lo_gr_alv->get_functions( ).
+      lo_gr_functions->set_all( abap_true ).
+      lo_layout = lo_gr_alv->get_layout( ).
+      lv_key-report = sy-repid.
+      lo_layout->set_key( lv_key ).
+      lo_layout->set_save_restriction( if_salv_c_layout=>restrict_none ).
+      lo_layout->set_default( abap_true ).
+      lo_display = lo_gr_alv->get_display_settings( ).
+      lo_display->Set_list_header( TEXT-rd2 ).
+      lo_gr_alv->get_display_settings( )->set_striped_pattern( abap_true ).
+      lo_gr_alv->display( ).
+
+    ELSEIF p_rd3 = 'X'.
+      TRY.
+          CALL METHOD cl_salv_table=>factory
+            IMPORTING
+              r_salv_table = lo_gr_alv
+            CHANGING
+              t_table      = gt_final3.
+        CATCH cx_salv_msg.
+      ENDTRY.
+      lo_cols = lo_gr_alv->get_columns( ).
+      lo_cols->set_optimize( 'X' ).
+      lo_gr_functions = lo_gr_alv->get_functions( ).
+      lo_gr_functions->set_all( abap_true ).
+      lo_layout = lo_gr_alv->get_layout( ).
+      lv_key-report = sy-repid.
+      lo_layout->set_key( lv_key ).
+      lo_layout->set_save_restriction( if_salv_c_layout=>restrict_none ).
+      lo_layout->set_default( abap_true ).
+      lo_display = lo_gr_alv->get_display_settings( ).
+      lo_display->Set_list_header( TEXT-rd3 ).
+      lo_gr_alv->get_display_settings( )->set_striped_pattern( abap_true ).
+      lo_gr_alv->display( ).
+
+    ELSEIF p_rd4 = 'X'.
+      TRY.
+          CALL METHOD cl_salv_table=>factory
+            IMPORTING
+              r_salv_table = lo_gr_alv
+            CHANGING
+              t_table      = gt_final4.
+        CATCH cx_salv_msg.
+      ENDTRY.
+      lo_cols = lo_gr_alv->get_columns( ).
+      lo_cols->set_optimize( 'X' ).
+      lo_gr_functions = lo_gr_alv->get_functions( ).
+      lo_gr_functions->set_all( abap_true ).
+      lo_layout = lo_gr_alv->get_layout( ).
+      lv_key-report = sy-repid.
+      lo_layout->set_key( lv_key ).
+      lo_layout->set_save_restriction( if_salv_c_layout=>restrict_none ).
+      lo_layout->set_default( abap_true ).
+      lo_display = lo_gr_alv->get_display_settings( ).
+      lo_display->Set_list_header( TEXT-rd4 ).
+      lo_gr_alv->get_display_settings( )->set_striped_pattern( abap_true ).
+      TRY.
+          lo_column = lo_cols->get_column( 'BUSINESSPARTNER' ).
+          lo_column->set_long_text( 'BP' ).                 "#EC NOTEXT
+          lo_column->set_medium_text( 'BP' ).
+          lo_column->set_short_text( 'BP' ).
+        CATCH cx_salv_not_found.                        "#EC NO_HANDLER
+      ENDTRY.
+      TRY.
+          lo_column = lo_cols->get_column( 'NAME' ). "added by avinash
+          lo_column->set_long_text( 'Error' ).              "#EC NOTEXT
+          lo_column->set_medium_text( 'Error' ).
+          lo_column->set_short_text( 'Error' ).
+        CATCH cx_salv_not_found.                        "#EC NO_HANDLER
+      ENDTRY.
+      TRY.
+          lo_column = lo_cols->get_column( 'NAME4' ).
+          lo_column->set_long_text( 'Short description' ).  "#EC NOTEXT
+          lo_column->set_medium_text( 'Short description' ).
+          lo_column->set_short_text( 'Short Desc' ).
+        CATCH cx_salv_not_found.                        "#EC NO_HANDLER
+      ENDTRY.
+      TRY.
+          lo_column = lo_cols->get_column( 'STR_SUPPL1' ).
+          lo_column->set_long_text( 'Address 1' ).          "#EC NOTEXT
+          lo_column->set_medium_text( 'Address 1' ).
+          lo_column->set_short_text( 'Address1' ).
+        CATCH cx_salv_not_found.                        "#EC NO_HANDLER
+      ENDTRY.
+      TRY.
+          lo_column = lo_cols->get_column( 'STR_SUPPL2' ).
+          lo_column->set_long_text( 'Address 2' ).          "#EC NOTEXT
+          lo_column->set_medium_text( 'Address 2' ).
+          lo_column->set_short_text( 'Address2' ).
+        CATCH cx_salv_not_found.                        "#EC NO_HANDLER
+      ENDTRY.
+      lo_gr_alv->display( ).
+
+    ELSEIF p_rd5 = 'X'.
+
+      TRY.
+          CALL METHOD cl_salv_table=>factory
+            IMPORTING
+              r_salv_table = lo_gr_alv
+            CHANGING
+              t_table      = gt_final5.
+        CATCH cx_salv_msg.
+      ENDTRY.
+      lo_cols = lo_gr_alv->get_columns( ).
+      lo_cols->set_optimize( 'X' ).
+      lo_gr_functions = lo_gr_alv->get_functions( ).
+      lo_gr_functions->set_all( abap_true ).
+      lo_layout = lo_gr_alv->get_layout( ).
+      lv_key-report = sy-repid.
+      lo_layout->set_key( lv_key ).
+      lo_layout->set_save_restriction( if_salv_c_layout=>restrict_none ).
+      lo_layout->set_default( abap_true ).
+      lo_display = lo_gr_alv->get_display_settings( ).
+      lo_display->Set_list_header( TEXT-rd5 ).
+      lo_gr_alv->get_display_settings( )->set_striped_pattern( abap_true ).
+      lo_gr_alv->display( ).
+    ELSEIF p_rd6 = 'X'.
+      TRY.
+          CALL METHOD cl_salv_table=>factory
+            IMPORTING
+              r_salv_table = lo_gr_alv
+            CHANGING
+              t_table      = gt_final6.
+        CATCH cx_salv_msg.
+      ENDTRY.
+      lo_cols = lo_gr_alv->get_columns( ).
+      lo_cols->set_optimize( 'X' ).
+      lo_gr_functions = lo_gr_alv->get_functions( ).
+      lo_gr_functions->set_all( abap_true ).
+      lo_layout = lo_gr_alv->get_layout( ).
+      lv_key-report = sy-repid.
+      lo_layout->set_key( lv_key ).
+      lo_layout->set_save_restriction( if_salv_c_layout=>restrict_none ).
+      lo_layout->set_default( abap_true ).
+      lo_display = lo_gr_alv->get_display_settings( ).
+      lo_display->Set_list_header( TEXT-rd6 ).
+      lo_gr_alv->get_display_settings( )->set_striped_pattern( abap_true ).
+      TRY.
+          lo_column = lo_cols->get_column( 'ZTERM' ).
+          lo_column->set_long_text( 'Company pay term' ).   "#EC NOTEXT
+          lo_column->set_medium_text( 'Company Pay term' ).
+          lo_column->set_short_text( 'Cocd pyTer' ).
+        CATCH cx_salv_not_found.                        "#EC NO_HANDLER
+      ENDTRY.
+
+      TRY.
+          lo_column = lo_cols->get_column( 'ZTERML' ).
+          lo_column->set_long_text( 'Purchasing pay term' ). "#EC NOTEXT
+          lo_column->set_medium_text( 'Purchasing Pay term' ).
+          lo_column->set_short_text( 'Pur pyTerm' ).
+        CATCH cx_salv_not_found.                        "#EC NO_HANDLER
+      ENDTRY.
+      lo_gr_alv->display( ).
+
+
+    ELSEIF p_rd7 = 'X'.
+
+      TRY.
+          CALL METHOD cl_salv_table=>factory
+            IMPORTING
+              r_salv_table = lo_gr_alv
+            CHANGING
+              t_table      = gt_final8.
+        CATCH cx_salv_msg.
+      ENDTRY.
+      lo_cols = lo_gr_alv->get_columns( ).
+      lo_cols->set_optimize( 'X' ).
+      lo_gr_functions = lo_gr_alv->get_functions( ).
+      lo_gr_functions->set_all( abap_true ).
+      lo_layout = lo_gr_alv->get_layout( ).
+      lv_key-report = sy-repid.
+      lo_layout->set_key( lv_key ).
+      lo_layout->set_save_restriction( if_salv_c_layout=>restrict_none ).
+      lo_layout->set_default( abap_true ).
+      lo_display = lo_gr_alv->get_display_settings( ).
+      lo_display->Set_list_header( TEXT-rd7 ).
+      lo_gr_alv->get_display_settings( )->set_striped_pattern( abap_true ).
+      TRY.
+          lo_column = lo_cols->get_column( 'ZTERM' ).
+          lo_column->set_long_text( 'Company pay term' ).   "#EC NOTEXT
+          lo_column->set_medium_text( 'Company Pay term' ).
+          lo_column->set_short_text( 'Cocd pyTer' ).
+        CATCH cx_salv_not_found.                        "#EC NO_HANDLER
+      ENDTRY.
+
+      TRY.
+          lo_column = lo_cols->get_column( 'ZTERML' ).
+          lo_column->set_long_text( 'Purchasing pay term' ). "#EC NOTEXT
+          lo_column->set_medium_text( 'Purchasing Pay term' ).
+          lo_column->set_short_text( 'Pur pyTerm' ).
+        CATCH cx_salv_not_found.                        "#EC NO_HANDLER
+      ENDTRY.
+      lo_gr_alv->display( ).
+*start insert 402167-31.07.2025-ECDK932773-6000001789-audit point
+    ELSEIF p_rd8 = 'X'.
+      TRY.
+          CALL METHOD cl_salv_table=>factory
+            IMPORTING
+              r_salv_table = lo_gr_alv
+            CHANGING
+              t_table      = gt_final9.
+        CATCH cx_salv_msg.
+      ENDTRY.
+      lo_cols = lo_gr_alv->get_columns( ).
+      lo_cols->set_optimize( 'X' ).
+      lo_gr_functions = lo_gr_alv->get_functions( ).
+      lo_gr_functions->set_all( abap_true ).
+      lo_layout = lo_gr_alv->get_layout( ).
+      lv_key-report = sy-repid.
+      lo_layout->set_key( lv_key ).
+      lo_layout->set_save_restriction( if_salv_c_layout=>restrict_none ).
+      lo_layout->set_default( abap_true ).
+      lo_display = lo_gr_alv->get_display_settings( ).
+*      lo_display->Set_list_header( TEXT-rd8 ).
+      lo_gr_alv->get_display_settings( )->set_striped_pattern( abap_true ).
+      TRY.
+          lo_column = lo_cols->get_column( 'ZTERM' ).
+          lo_column->set_long_text( 'Company pay term' ).   "#EC NOTEXT
+          lo_column->set_medium_text( 'Company Pay term' ).
+          lo_column->set_short_text( 'Cocd pyTer' ).
+        CATCH cx_salv_not_found.                        "#EC NO_HANDLER
+      ENDTRY.
+
+      TRY.
+          lo_column = lo_cols->get_column( 'ZTERM1' ).
+          lo_column->set_long_text( 'Purchasing pay term' ). "#EC NOTEXT
+          lo_column->set_medium_text( 'Purchasing Pay term' ).
+          lo_column->set_short_text( 'Pur pyTerm' ).
+        CATCH cx_salv_not_found.                        "#EC NO_HANDLER
+      ENDTRY.
+      lo_gr_alv->display( ).
+
+    ELSEIF p_rd9 = 'X'.
+      TRY.
+          CALL METHOD cl_salv_table=>factory
+            IMPORTING
+              r_salv_table = lo_gr_alv
+            CHANGING
+              t_table      = lt_duplicates.
+        CATCH cx_salv_msg.
+      ENDTRY.
+      lo_cols = lo_gr_alv->get_columns( ).
+      lo_cols->set_optimize( 'X' ).
+      lo_gr_functions = lo_gr_alv->get_functions( ).
+      lo_gr_functions->set_all( abap_true ).
+      lo_layout = lo_gr_alv->get_layout( ).
+      lv_key-report = sy-repid.
+      lo_layout->set_key( lv_key ).
+      lo_layout->set_save_restriction( if_salv_c_layout=>restrict_none ).
+      lo_layout->set_default( abap_true ).
+      lo_display = lo_gr_alv->get_display_settings( ).
+*      lo_display->Set_list_header( TEXT-rd8 ).
+      lo_gr_alv->get_display_settings( )->set_striped_pattern( abap_true ).
+      lo_gr_alv->display( ).
+
+
+    ELSEIF p_rd10 = 'X'.
+
+      TRY.
+          CALL METHOD cl_salv_table=>factory
+            IMPORTING
+              r_salv_table = lo_gr_alv
+            CHANGING
+              t_table      = gt_final11_1.
+        CATCH cx_salv_msg.
+      ENDTRY.
+      lo_cols = lo_gr_alv->get_columns( ).
+      lo_cols->set_optimize( 'X' ).
+      lo_gr_functions = lo_gr_alv->get_functions( ).
+      lo_gr_functions->set_all( abap_true ).
+      lo_layout = lo_gr_alv->get_layout( ).
+      lv_key-report = sy-repid.
+      lo_layout->set_key( lv_key ).
+      lo_layout->set_save_restriction( if_salv_c_layout=>restrict_none ).
+      lo_layout->set_default( abap_true ).
+      lo_display = lo_gr_alv->get_display_settings( ).
+*      lo_display->Set_list_header( TEXT-rd8 ).
+      lo_gr_alv->get_display_settings( )->set_striped_pattern( abap_true ).
+      lo_gr_alv->display( ).
+
+    ELSEIF p_rd11 = 'X'.
+
+      TRY.
+          CALL METHOD cl_salv_table=>factory
+            IMPORTING
+              r_salv_table = lo_gr_alv
+            CHANGING
+              t_table      = gt_final_111.
+        CATCH cx_salv_msg.
+      ENDTRY.
+      lo_cols = lo_gr_alv->get_columns( ).
+      lo_cols->set_optimize( 'X' ).
+      lo_gr_functions = lo_gr_alv->get_functions( ).
+      lo_gr_functions->set_all( abap_true ).
+      lo_layout = lo_gr_alv->get_layout( ).
+      lv_key-report = sy-repid.
+      lo_layout->set_key( lv_key ).
+      lo_layout->set_save_restriction( if_salv_c_layout=>restrict_none ).
+      lo_layout->set_default( abap_true ).
+      lo_display = lo_gr_alv->get_display_settings( ).
+*      lo_display->Set_list_header( TEXT-rd8 ).
+      lo_gr_alv->get_display_settings( )->set_striped_pattern( abap_true ).
+      lo_gr_alv->display( ).
+    ENDIF.
+*  end insert 402167-31.07.2025-ECDK932773-6000001789-audit point
+  ELSE.
+    TRY.
+        CALL METHOD cl_salv_table=>factory
+          IMPORTING
+            r_salv_table = lo_gr_alv
+          CHANGING
+            t_table      = gt_final7.
+      CATCH cx_salv_msg.
+    ENDTRY.
+    lo_cols = lo_gr_alv->get_columns( ).
+    lo_cols->set_optimize( 'X' ).
+    lo_gr_functions = lo_gr_alv->get_functions( ).
+    lo_gr_functions->set_all( abap_true ).
+    lo_layout = lo_gr_alv->get_layout( ).
+    lv_key-report = sy-repid.
+    lo_layout->set_key( lv_key ).
+    lo_layout->set_save_restriction( if_salv_c_layout=>restrict_none ).
+    lo_layout->set_default( abap_true ).
+    lo_display = lo_gr_alv->get_display_settings( ).
+    lo_display->Set_list_header('Vendor all master data ').
+    lo_gr_alv->get_display_settings( )->set_striped_pattern( abap_true ).
+    lo_gr_alv->display( ).
+  ENDIF.
+
+ENDFORM.
+
+
+
+
+
+
