@@ -1,0 +1,19 @@
+What is the difference between User Exit and Function Exit?
+
+User Exit	Customer Exit
+User exit is implemented in the form of a Subroutine i.e. PERFORM xxx.
+Example: INCLUDE MVF5AFZZ
+PERFORM userexit_save_document_prepare.	A customer exit can be implemented as:
+·         Function exit
+·         Screen Exit
+·         Menu Exit
+·         Field Exit
+Example: CALL Customer function ‘xxx’
+INCLUDE xxx.
+You modify this include.
+In case of a PERFORM, you have access to almost all the data. So you have better control, but more risk of making the system unstable.	You have access only to the importing, exporting, changing and tables parameter of the Function Module. So you have limited access to data.
+User exit is considered a modification and not an enhancement.	A customer exit is considered an enhancement.
+You need Access Key for User Exit.	You do not need access key.
+Changes are lost in case of an upgrade.	Changes are upgrade compatible.
+User exit is the earliest form of change option offered by SAP.	Customer exits came later and they overcome the shortcomings of User Exit.
+No such thing is required here.	To activate a function exit, you need to create a project in SMOD and activate the project.
