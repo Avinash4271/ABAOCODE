@@ -1,0 +1,47 @@
+BADI is another way of implementing enhancements to the standard programs without modifying the original code. BADI's are implemented using OO programming technique Technically a BADI is nothing but an interface. Each BADI consists of the method without implementation called as BADI definition
+
+•	BADI stands for Business Add ins just like Customer Exits, BADI help hook custom enhancements to SAP functionality. It is another way of implementing enhancement to the standard programs without modifying the original code.
+
+•	BADI’s are implemented using Object Oriented Programming technique
+
+•	Technically a BADI is nothing but an interface.
+
+•	Each BADI consists of the method without Implementation called as BADI definition
+
+•	We need to create classes to write the abap code by implementing the methods called as BADI implementation
+
+BADI Implementation Steps
+SE18 is the tcode for BADI Definition
+SE19 is the tcode for BADI Implementations
+The interface name for a BADI will be as below
+Ex:- IF_EX<BADI_NAME>
+
+The class name for a BADI will be as below
+Ex:- ZCL_EX_<Implementation_name>
+
+Advantages of BADI
+•	The main advantage of using BADI is, we can create multiple implementation for a single BADI Definition
+•	Where as with the exits, we can create a single implementation ie. a single project for a enhancement.
+•	We can not create another project (implementation) for enhancement which is already used. That is why we go for BADI’s
+
+
+
+
+
+
+
+
+
+
+
+
+
+Types of BADI’s
+ 
+
+ 
+
+ 
+
+
+
