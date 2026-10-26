@@ -1,0 +1,2345 @@
+class ZCL_ZSD_CUST_FG_DPC_EXT definition
+* ---------------------- SR.NO..001 -----------------------------------*
+* ChaRM Ticket..6000001684    Tr.Request..ECDK931883   Date.19.12.2024
+* Developer.....Avinash Devkar        User ID....402167
+* Functional....Mr. ananda hatkar
+*----------------------------------------------------------------------*
+  public
+  inheriting from ZCL_ZSD_CUST_FG_DPC
+  create public .
+
+public section.
+
+  methods /IWBEP/IF_MGW_APPL_SRV_RUNTIME~CREATE_DEEP_ENTITY
+    redefinition .
+  methods /IWBEP/IF_MGW_APPL_SRV_RUNTIME~GET_STREAM
+    redefinition .
+  methods /IWBEP/IF_MGW_CORE_SRV_RUNTIME~CHANGESET_BEGIN
+    redefinition .
+  methods /IWBEP/IF_MGW_CORE_SRV_RUNTIME~CHANGESET_END
+    redefinition .
+protected section.
+
+  methods ET_BILLDATASET_GET_ENTITYSET
+    redefinition .
+  methods ET_LABNOSET_GET_ENTITYSET
+    redefinition .
+  methods ET_LIFNRSET_GET_ENTITYSET
+    redefinition .
+  methods ET_LOADTYSET_GET_ENTITYSET
+    redefinition .
+  methods ET_MODTYPESET_GET_ENTITYSET
+    redefinition .
+  methods ET_PACKAGESET_CREATE_ENTITY
+    redefinition .
+  methods ET_PACKAGESET_DELETE_ENTITY
+    redefinition .
+  methods ET_PACKAGESET_GET_ENTITYSET
+    redefinition .
+  methods ET_PRINTSET_GET_ENTITY
+    redefinition .
+  methods ET_SUBMITSET_CREATE_ENTITY
+    redefinition .
+  methods ET_VEHTYPESET_DELETE_ENTITY
+    redefinition .
+  methods ET_VEHTYPESET_GET_ENTITYSET
+    redefinition .
+  methods ET_PLANTSET_GET_ENTITYSET
+    redefinition .
+private section.
+ENDCLASS.
+
+
+
+CLASS ZCL_ZSD_CUST_FG_DPC_EXT IMPLEMENTATION.
+
+
+  METHOD /iwbep/if_mgw_appl_srv_runtime~create_deep_entity.
+    DATA BEGIN OF ls_data_deep.
+    INCLUDE TYPE zcl_zsd_cust_fg_mpc=>Ts_ET_PACKAGE.
+    DATA scan TYPE zcl_zsd_cust_fg_mpc=>tt_et_scan.
+    DATA END OF ls_data_deep.
+    DATA es_entity TYPE zcl_zsd_cust_fg_mpc=>ts_et_scan.
+    DATA: lo_container TYPE REF TO /iwbep/if_message_container.
+
+    DATA : lv_kunnr TYPE kunnr,
+           p_werks1 TYPE werks_d. "ins Avinash : 26.09.2025 : ECDK933195
+    DATA : gt_dtl TYPE TABLE OF zsd_cust_fg_st,
+           gs_dtl TYPE zsd_cust_fg_st.
+    DATA : ls_dtl TYPE zsd_cust_fg_st,
+           lv_msg TYPE bapi_msg.
+
+    DATA BEGIN OF ls_billdata.
+    INCLUDE TYPE zcl_zsd_cust_fg_mpc=>ts_et_billhead.
+    DATA item TYPE zcl_zsd_cust_fg_mpc=>tt_et_billitem.
+    DATA gt TYPE zcl_zsd_cust_fg_mpc=>tt_et_gt.
+    DATA gt7 TYPE zcl_zsd_cust_fg_mpc=>tt_et_gt7.
+    DATA END OF ls_billdata.
+
+    IF iv_entity_set_name = 'ET_PACKAGESet'.
+
+      TRY .
+          io_data_provider->read_entry_data(
+            IMPORTING
+              es_data = ls_data_deep
+          ).
+        CATCH /iwbep/cx_mgw_tech_exception. " Technical Exception
+      ENDTRY.
+      lo_container = me->mo_context->get_message_container( ).
+
+      lv_kunnr = ls_data_deep-kunnr.
+      lv_kunnr = |{ lv_kunnr ALPHA = IN }|.
+
+      IF ls_data_deep-kdmat = 'SUBMIT'.       "SUBMIT Button
+
+        DATA   lv_labno    TYPE zsd_cust_fg_st-labno.
+        CLEAR lv_labno.
+        SELECT MAX( labno ) FROM zsd_cust_fg_st INTO lv_labno
+          WHERE werks = ls_data_deep-werks
+          AND   matnr = ls_data_deep-matnr
+          AND   kunnr = lv_kunnr.
+
+        IF ls_data_deep-srnos = 'C'. "for change
+
+          lv_labno = ls_data_deep-labno.
+        ELSE.
+          IF lv_labno  IS INITIAL.
+            lv_labno  = 1.
+          ELSE.
+            lv_labno  = lv_labno  + 1.
+          ENDIF.
+        ENDIF.
+        IF NOT ls_data_deep-scan IS INITIAL.
+          LOOP AT ls_data_deep-scan INTO DATA(ls_scan).
+            SELECT SINGLE * FROM zsd_cust_fg_st WHERE werks = @ls_data_deep-werks
+                                                  AND matnr = @ls_data_deep-matnr
+                                                  AND kunnr = @lv_kunnr
+                                                  AND srnos = @ls_scan-serial
+                                                  AND labno = @lv_labno
+                                                  AND kdmat = @ls_scan-kdmat
+                                                INTO @DATA(ls_check).
+            IF sy-subrc NE 0.
+              gs_dtl-werks = ls_data_deep-werks.
+              gs_dtl-matnr = ls_data_deep-matnr.
+              gs_dtl-mjahr = ls_scan-year.
+              IF gs_dtl-mjahr = '0000'.
+                CLEAR : gs_dtl-mjahr.
+              ENDIF.
+              gs_dtl-srnos = ls_scan-serial.
+              gs_dtl-sdate = ls_scan-date.
+              IF gs_dtl-sdate = '00000000'.
+                CLEAR : gs_dtl-sdate.
+              ENDIF.
+              gs_dtl-kunnr = lv_kunnr.
+              TRANSLATE  ls_scan-kdmat TO UPPER CASE . "added Avinash : 19.12.2024 : ECDK932068
+              gs_dtl-kdmat = ls_scan-kdmat.
+              gs_dtl-pkgno = ls_data_deep-pkgno.
+              gs_dtl-labno = lv_labno.
+              gs_dtl-erdat = sy-datum.
+              gs_dtl-ernam = sy-uname.
+              gs_dtl-ertim = sy-uzeit.
+              gs_dtl-dtcode = ls_scan-dtcode.
+              gs_dtl-vndrcd = ls_scan-vndrcd. "added Avinash : 19.12.2024 : ECDK932068
+              APPEND gs_dtl TO gt_dtl.
+            ELSE.
+
+            ENDIF.
+
+
+            CLEAR : gs_dtl, ls_scan.
+          ENDLOOP.
+
+          lv_msg = | Outer Label Number generated... { lv_labno } |.
+
+          MODIFY zsd_cust_fg_st FROM TABLE gt_dtl.
+          COMMIT WORK.
+          IF sy-subrc = 0.
+            CALL METHOD lo_container->add_message
+              EXPORTING
+                iv_msg_type               = /iwbep/cl_cos_logger=>success
+                iv_msg_id                 = '00'
+                iv_msg_number             = '000'
+                iv_msg_text               = lv_msg
+                iv_add_to_response_header = abap_true.
+            copy_data_to_ref( EXPORTING is_data = ls_data_deep
+                              CHANGING  cr_data = er_deep_entity ).
+            EXIT.
+          ENDIF.
+        ENDIF.
+      ELSE.
+        IF ls_data_deep-maktx IS NOT INITIAL. "scan string in maktx
+          DATA(lv_str1) = ls_data_deep-maktx.
+
+          DATA : mth(2) TYPE c,
+                 yer(2) TYPE c.
+
+          DATA lv_date(10) TYPE c.
+          SPLIT lv_str1 AT '-' INTO DATA(str1) DATA(str2) DATA(str3) DATA(str4).
+          CONDENSE : str1, str2, str3, str4.
+
+          SELECT SINGLE * FROM zsd_cust_fg_pk INTO @DATA(ls_hdr)
+            WHERE werks = @ls_data_deep-werks
+            AND   matnr = @ls_data_deep-matnr
+            AND   kunnr = @lv_kunnr.
+
+          IF ls_hdr-pkgno = ls_data_deep-no.
+            CALL METHOD lo_container->add_message
+              EXPORTING
+                iv_msg_type               = /iwbep/cl_cos_logger=>error
+                iv_msg_id                 = '00'
+                iv_msg_number             = '000'
+                iv_msg_text               = 'Part number should not be greater than packing..'
+                iv_add_to_response_header = abap_true.
+            copy_data_to_ref( EXPORTING is_data = ls_data_deep
+                              CHANGING  cr_data = er_deep_entity ).
+            EXIT.
+
+          ENDIF.
+          CLEAR mth.
+          ls_dtl-werks = ls_hdr-werks.
+          ls_dtl-matnr = ls_hdr-matnr.
+          ls_dtl-srnos = str2.
+          ls_dtl-pkgno = ls_hdr-pkgno.
+          ls_dtl-dtcode = str3.
+          ls_dtl-kunnr = ls_hdr-kunnr.
+          DELETE ls_data_deep-scan WHERE kdmat = ''.
+
+          DESCRIBE TABLE ls_data_deep-scan LINES DATA(lv_lines1).
+          LOOP AT ls_data_deep-scan  ASSIGNING FIELD-SYMBOL(<lfs_line>).
+            <lfs_line>-werks = ls_hdr-werks.
+            <lfs_line>-matnr = ls_hdr-matnr.
+            <lfs_line>-kunnr = ls_hdr-kunnr.
+          ENDLOOP.
+          CASE ls_dtl-dtcode+2(1).
+            WHEN 'A'. mth = '01'.
+            WHEN 'B'. mth = '02'.
+            WHEN 'C'. mth = '03'.
+            WHEN 'D'. mth = '04'.
+            WHEN 'E'. mth = '05'.
+            WHEN 'F'. mth = '06'.
+            WHEN 'G'. mth = '07'.
+            WHEN 'H'. mth = '08'.
+            WHEN 'I'. mth = '09'.
+            WHEN 'J'. mth = '10'.
+            WHEN 'K'. mth = '11'.
+            WHEN 'L'. mth = '12'.
+          ENDCASE.
+
+          CLEAR yer.
+          yer = ls_dtl-dtcode+3(2).
+
+          CLEAR lv_date.
+          CONCATENATE ls_dtl-dtcode+0(2) mth yer INTO lv_date.
+          CALL FUNCTION 'CONVERT_DATE_TO_INTERNAL'
+            EXPORTING
+              date_external            = lv_date
+            IMPORTING
+              date_internal            = lv_date
+            EXCEPTIONS
+              date_external_is_invalid = 1.
+          IF lv_date IS NOT INITIAL.  "added Avinash : 19.12.2024 : ECDK932068
+            ls_dtl-sdate = lv_date.
+          ELSE.
+            ls_dtl-sdate = sy-datum. "added Avinash : 19.12.2024 : ECDK932068
+          ENDIF.
+          ls_dtl-mjahr = ls_dtl-sdate+0(4).
+          ls_dtl-kdmat  = str1.
+          ls_dtl-vndrcd = str4.
+          ls_dtl-vndrcd = |{ ls_dtl-vndrcd ALPHA = IN }|.
+          es_entity = CORRESPONDING #( ls_dtl ).
+          TRANSLATE es_entity-kdmat TO UPPER CASE.  "added Avinash : 19.12.2024 : ECDK932068
+          IF lv_date IS NOT INITIAL.
+            es_entity-date = lv_date.
+          ELSE.
+            es_entity-date = sy-datum.
+          ENDIF.
+          es_entity-year =  ls_dtl-sdate+0(4).
+          es_entity-serial = str2.
+          TRANSLATE ls_dtl-kdmat TO UPPER CASE.
+
+
+          IF ls_dtl-kdmat NE ls_hdr-kdmat.
+            CALL METHOD lo_container->add_message
+              EXPORTING
+                iv_msg_type               = /iwbep/cl_cos_logger=>error
+                iv_msg_id                 = '00'
+                iv_msg_number             = '000'
+                iv_msg_text               = 'Part number not match..'
+                iv_add_to_response_header = abap_true.
+            copy_data_to_ref( EXPORTING is_data = ls_data_deep
+                              CHANGING  cr_data = er_deep_entity ).
+            EXIT.
+          ELSE.
+            SELECT SINGLE * FROM zsd_cust_fg_st INTO @DATA(ls_st)
+             WHERE werks = @ls_dtl-werks
+             AND   matnr = @ls_dtl-matnr
+             AND  ( mjahr = @ls_dtl-mjahr OR  mjahr = '0000' )
+             AND   srnos = @ls_dtl-srnos
+             AND  ( sdate = @ls_dtl-sdate OR sdate = '00000000' )
+             AND   kunnr = @ls_dtl-kunnr.
+
+            IF sy-subrc = 0.
+              CALL METHOD lo_container->add_message
+                EXPORTING
+                  iv_msg_type               = /iwbep/cl_cos_logger=>error
+                  iv_msg_id                 = '00'
+                  iv_msg_number             = '000'
+                  iv_msg_text               = 'Part number already scanned...'
+                  iv_add_to_response_header = abap_true.
+              copy_data_to_ref( EXPORTING is_data = ls_data_deep
+                                CHANGING  cr_data = er_deep_entity ).
+              EXIT.
+            ELSE.
+              READ TABLE ls_data_deep-scan  WITH KEY werks = ls_dtl-werks
+                                       matnr = ls_dtl-matnr
+                                       year = ls_dtl-mjahr
+                                       serial = ls_dtl-srnos
+                                       date = ls_dtl-sdate
+                                       kunnr = ls_dtl-kunnr
+                              TRANSPORTING NO FIELDS.
+              IF sy-subrc = 0.
+
+                CALL METHOD lo_container->add_message
+                  EXPORTING
+                    iv_msg_type               = /iwbep/cl_cos_logger=>error
+                    iv_msg_id                 = '00'
+                    iv_msg_number             = '000'
+                    iv_msg_text               = 'Part number already scanned..pl check below data.'
+                    iv_add_to_response_header = abap_true.
+
+                copy_data_to_ref( EXPORTING is_data = ls_data_deep
+                                  CHANGING  cr_data = er_deep_entity ).
+                EXIT.
+              ELSE.
+                DESCRIBE TABLE ls_data_deep-scan LINES DATA(lv_lines).
+                ls_data_deep-no = lv_lines + 1.
+                APPEND es_entity TO ls_data_deep-scan .
+                DELETE ls_data_deep-scan WHERE kdmat = ''.
+                copy_data_to_ref( EXPORTING is_data = ls_data_deep
+                                  CHANGING  cr_data = er_deep_entity ).
+              ENDIF.
+            ENDIF.
+          ENDIF.
+
+          copy_data_to_ref( EXPORTING is_data = ls_data_deep
+                            CHANGING  cr_data = er_deep_entity ).
+        ELSE.
+          copy_data_to_ref( EXPORTING is_data = ls_data_deep
+                            CHANGING  cr_data = er_deep_entity ).
+
+        ENDIF.
+*    APPEND es_entity TO ls_data_deep-scan .
+        copy_data_to_ref( EXPORTING is_data = ls_data_deep
+                          CHANGING  cr_data = er_deep_entity ).
+      ENDIF.
+
+
+
+
+
+
+
+    ELSEIF iv_entity_set_name = 'ET_BILLHEADSet'.
+      DATA : l_matnr TYPE mara-matnr,
+             l_kunnr TYPE kna1-kunnr.
+
+      DATA: r1 TYPE c,
+            r2 TYPE c.
+*    *- Structure delcaration
+      TYPES : BEGIN OF gty_lips,
+                vbeln TYPE lips-vbeln,
+                posnr TYPE lips-posnr,
+                matnr TYPE lips-matnr,
+                werks TYPE lips-werks,
+                kdmat TYPE lips-kdmat,
+                lfimg TYPE lips-lfimg,
+                meins TYPE lips-meins,
+                vgbel TYPE lips-vgbel,
+                vgpos TYPE lips-vgpos,
+                vtweg TYPE lips-vtweg,
+                spart TYPE lips-spart,
+                lgort TYPE lips-lgort, "Avinash : 26.09.2025 : ECDK933195
+              END OF gty_lips.
+      TYPES : BEGIN OF gty_dtl.
+                INCLUDE TYPE gty_lips.
+      TYPES :   maktx TYPE makt-maktx,
+                pkgno TYPE lips-lfimg,
+                mark  TYPE boolean,
+              END OF gty_dtl.
+
+      TYPES : BEGIN OF gty_st,
+                werks   TYPE zsd_cust_fg_st-werks,
+                matnr   TYPE zsd_cust_fg_st-matnr,
+                kunnr   TYPE kunnr,
+                pkgno   TYPE zsd_cust_fg_st-pkgno,
+                labno   TYPE zsd_cust_fg_st-labno,
+                flag(1) TYPE c,
+                vbeln   TYPE lips-vbeln,
+                posnr   TYPE lips-posnr,
+              END OF gty_st.
+      DATA: lwa_dtl TYPE gty_dtl,
+            gt_dtl1 TYPE STANDARD TABLE OF gty_dtl.
+
+      DATA : lwa_st  TYPE gty_st,
+             lwa_st7 TYPE gty_st,
+             gt_st   TYPE STANDARD TABLE OF gty_st,
+             gt_st7  TYPE STANDARD TABLE OF gty_st.
+
+      DATA : header_data    TYPE bapiobdlvhdrchg,
+             header_control TYPE bapiobdlvhdrctrlchg,
+             delivery       TYPE bapiobdlvhdrchg-deliv_numb,
+             techn_control  TYPE bapidlvcontrol,
+             return         TYPE STANDARD TABLE OF bapiret2.
+      DATA: p_vbeln TYPE vbeln.
+      DATA flg(1) TYPE c.
+      DATA : lwa_bdcdata TYPE bdcdata,
+             bdcdata     TYPE TABLE OF bdcdata,
+             lwa_messtab TYPE bdcmsgcoll,
+             messtab     TYPE TABLE OF bdcmsgcoll,
+             opt         TYPE ctu_params.
+*er_deep_entity = 's'.
+      CLEAR: gt_dtl, gt_st7, gt_st.
+
+      TRY .
+          io_data_provider->read_entry_data(
+            IMPORTING
+              es_data = ls_billdata
+          ).
+        CATCH /iwbep/cx_mgw_tech_exception. " Technical Exception
+      ENDTRY.
+      lo_container = me->mo_context->get_message_container( ).
+
+      IF ls_billdata-string IS NOT INITIAL.
+        SPLIT ls_billdata-string AT '-' INTO DATA(lv_matnr) DATA(lv_labno1) DATA(lv_pkgno) DATA(lv_kunnr1).
+
+        IF  ls_billdata-string = 'PARK'.
+          LOOP AT ls_billdata-item INTO DATA(ls_data) WHERE flag = 'X'.
+            UPDATE zsd_cust_fg_st SET vbeln = ls_data-vbeln
+                                  WHERE werks = ls_data-werks
+                                  AND   matnr = ls_data-matnr
+                                  AND   kunnr = ls_data-kunnr "
+                                  AND   labno = ls_data-labno.
+            CLEAR ls_st.
+          ENDLOOP.
+
+          CALL METHOD lo_container->add_message
+            EXPORTING
+              iv_msg_type               = /iwbep/cl_cos_logger=>success
+              iv_msg_id                 = '00'
+              iv_msg_number             = '000'
+              iv_msg_text               = 'DATA Park succesfully...'
+              iv_add_to_response_header = abap_true.
+
+          copy_data_to_ref( EXPORTING is_data = ls_billdata
+                            CHANGING  cr_data = er_deep_entity ).
+          EXIT.
+        ELSE.
+          SELECT SINGLE 'X' FROM tvarvc INTO @DATA(gv_ewh)
+            WHERE name = 'S_EWH_PLANT'
+            AND   low  = @ls_billdata-werks.
+          "" Avinash : 26.09.2025 : ECDK933195
+
+
+
+*          LOOP AT ls_billdata-item INTO DATA(lwa_item1) . "replace by avinash:01.06.2026:ECDK933975
+          LOOP AT ls_billdata-item INTO DATA(lwa_item1) WHERE matnr = lv_matnr and kunnr = lv_kunnr1 and labno = lv_labno1.
+            IF lwa_item1-tabname = 'GT_DTL'.
+
+              lwa_dtl-werks = lwa_item1-werks.
+              lwa_dtl-matnr = lwa_item1-matnr.
+              lwa_dtl-pkgno = lwa_item1-pkgno.
+              lwa_dtl-vbeln = lwa_item1-vbeln.
+              p_vbeln = lwa_item1-vbeln.
+              lwa_dtl-maktx = lwa_item1-maktx.
+              lwa_dtl-lfimg = lwa_item1-lfimg.
+              lwa_dtl-meins = lwa_item1-meins.
+              lwa_dtl-posnr = lwa_item1-posnr.
+
+              APPEND lwa_dtl TO gt_dtl1.
+
+            ELSEIF lwa_item1-tabname = 'GT_ST'.
+              CLEAR lwa_st.
+              lwa_st-werks = lwa_item1-werks.
+              lwa_st-matnr = lwa_item1-matnr.
+              lwa_st-pkgno = lwa_item1-pkgno.
+              lwa_st-labno = lwa_item1-labno.
+              lwa_st-vbeln = lwa_item1-vbeln.
+              lwa_st-posnr = lwa_item1-posnr.
+              lwa_st-flag = lwa_item1-flag.
+              lv_kunnr =  lwa_item1-kunnr.
+              lv_kunnr = |{ lv_kunnr ALPHA = IN }|.
+              lwa_st-kunnr = lv_kunnr.
+              APPEND lwa_st TO gt_st.
+            ELSEIF lwa_item1-tabname = 'GT_ST7'.
+              CLEAR lwa_st7.
+              lwa_st7-werks = lwa_item1-werks.
+              lwa_st7-matnr = lwa_item1-matnr.
+              lwa_st7-pkgno = lwa_item1-pkgno.
+              lwa_st7-labno = lwa_item1-labno.
+              lwa_st7-vbeln = lwa_item1-vbeln.
+              lwa_st7-posnr = lwa_item1-posnr.
+              lwa_st7-flag = lwa_item1-flag.
+              lv_kunnr =  lwa_item1-kunnr.
+              lv_kunnr = |{ lv_kunnr ALPHA = IN }|.
+              lwa_st7-kunnr = lv_kunnr.
+              APPEND lwa_st7 TO gt_st7.
+            ENDIF.
+          ENDLOOP.
+*start insert Avinash : 26.09.2025 : ECDK933195
+          SELECT a~vbeln, a~posnr, a~matnr, a~werks, a~kdmat, b~kunag, a~lfimg,
+                a~meins, a~vgbel, a~vgpos, a~vtweg, a~spart, b~vstel, a~lgort
+           FROM lips AS a INNER JOIN likp AS b
+           ON a~vbeln = b~vbeln
+         INNER JOIN @ls_billdata-item AS gt
+            ON a~vbeln = gt~vbeln
+         WHERE  a~werks EQ @ls_billdata-werks
+             AND b~vkorg EQ '1100'
+            INTO TABLE @DATA(gt_lips).
+*End insert Avinash : 26.09.2025 : ECDK933195
+          IF NOT lv_matnr IS INITIAL.
+            CALL FUNCTION 'CONVERSION_EXIT_MATN1_INPUT'
+              EXPORTING
+                input  = lv_matnr
+              IMPORTING
+                output = l_matnr.
+          ENDIF.
+          IF NOT lv_kunnr1 IS INITIAL.
+            CALL FUNCTION 'CONVERSION_EXIT_ALPHA_INPUT'
+              EXPORTING
+                input  = lv_kunnr1
+              IMPORTING
+                output = l_kunnr.
+          ENDIF.
+
+
+          DATA : ln  TYPE i,
+                 ln1 TYPE i.
+          DATA lv_check(1) TYPE c.
+
+          CLEAR : ln, ln1, lv_check.
+          SORT : ls_billdata-gt  BY werks matnr kunnr labno,
+                 ls_billdata-gt7 BY werks matnr kunnr labno.
+*start insert Avinash : 26.09.2025 : ECDK933195
+          IF gv_ewh = 'X'.
+            READ TABLE gt_lips INTO DATA(ls_lips) INDEX 1.
+            p_werks1 = ls_lips-lgort.
+          ELSE.
+            p_werks1 = ls_billdata-werks.
+          ENDIF.
+
+          READ TABLE gt_lips INTO DATA(ls_lips7) INDEX 1.
+          DATA(gv_lgort) = ls_lips7-lgort.
+*          IF gv_lgort = '1120'.
+          IF gv_lgort = '1120' OR gv_lgort = '1159'. "replace by avinash 6000001973:ECDK933860:29.04.2026
+            SORT : ls_billdata-gt  BY matnr kunnr labno,
+          ls_billdata-gt7 BY matnr kunnr labno.
+          ENDIF.
+*End insert Avinash : 26.09.2025 : ECDK933195
+*          IF gv_lgort = '1120'.
+          IF gv_lgort NE '1120' AND  gv_lgort NE '1159'."replace by avinash 6000001973:ECDK933860:29.04.2026
+            READ TABLE gt_st7 INTO DATA(lw_st) WITH KEY werks =  ls_billdata-werks  "04.02.2026
+                                                        matnr = l_matnr
+                                                        kunnr = l_kunnr  " nrp : 18.10.2024 : ECDK931883
+                                                        labno = lv_labno1 BINARY SEARCH.
+            IF sy-subrc = 0.
+              CALL METHOD lo_container->add_message
+                EXPORTING
+                  iv_msg_type               = /iwbep/cl_cos_logger=>error
+                  iv_msg_id                 = '00'
+                  iv_msg_number             = '000'
+                  iv_msg_text               = 'Already scanned...'
+                  iv_add_to_response_header = abap_true.
+
+              copy_data_to_ref( EXPORTING is_data = ls_billdata
+                                CHANGING  cr_data = er_deep_entity ).
+              EXIT.
+            ELSE.
+              READ TABLE gt_st INTO DATA(ls_st1) WITH KEY werks = ls_billdata-werks  "04.02.2026
+                                                         matnr = l_matnr
+                                                         kunnr = l_kunnr
+                                                         labno = lv_labno1 BINARY SEARCH.
+              IF sy-subrc NE 0.
+
+                CALL METHOD lo_container->add_message
+                  EXPORTING
+                    iv_msg_type               = /iwbep/cl_cos_logger=>error
+                    iv_msg_id                 = '00'
+                    iv_msg_number             = '000'
+                    iv_msg_text               = 'Scanned record not found...'
+                    iv_add_to_response_header = abap_true.
+
+                copy_data_to_ref( EXPORTING is_data = ls_billdata
+                                  CHANGING  cr_data = er_deep_entity ).
+                EXIT.
+              ELSE.
+                ln = sy-tabix.
+                IF ls_st1-flag = 'X'.
+                  CALL METHOD lo_container->add_message
+                    EXPORTING
+                      iv_msg_type               = /iwbep/cl_cos_logger=>error
+                      iv_msg_id                 = '00'
+                      iv_msg_number             = '000'
+                      iv_msg_text               = 'Already scanned...'
+                      iv_add_to_response_header = abap_true.
+
+                  copy_data_to_ref( EXPORTING is_data = ls_billdata
+                                    CHANGING  cr_data = er_deep_entity ).
+                  EXIT.
+                ELSE.
+                  SELECT SINGLE * FROM zsd_cust_fg_pk INTO @DATA(ls_pk)
+*                  WHERE werks = @ls_billdata-werks
+*                    WHERE werks = @p_werks1      "added by Avinash : 26.09.2025 : ECDK933195
+                    WHERE werks = @ls_billdata-werks    "added by Avinash : 26.09.2025 : ECDK933195
+                    AND   matnr = @l_matnr
+                    AND   kunnr = @l_kunnr
+                    AND   kdmat = @ls_st-kdmat.
+                  IF ls_pk-tick2 = 'X'.
+                    IF ln NE 1.
+                      ln1 = ln - 1.
+                      READ TABLE gt_st7 INTO DATA(ls_st7) INDEX ln1.
+                      IF sy-subrc = 0 AND ls_st7-flag = '' AND ls_st7-matnr = l_matnr.
+                        lv_msg = | Please scan previous Label. { ls_st7-labno  }|.
+                        CALL METHOD lo_container->add_message
+                          EXPORTING
+                            iv_msg_type               = /iwbep/cl_cos_logger=>error
+                            iv_msg_id                 = '00'
+                            iv_msg_number             = '000'
+                            iv_msg_text               = lv_msg
+                            iv_add_to_response_header = abap_true.
+
+                        copy_data_to_ref( EXPORTING is_data = ls_billdata
+                                          CHANGING  cr_data = er_deep_entity ).
+                        EXIT.
+                      ELSE.
+                        lv_check = 'X'.
+                      ENDIF.
+                    ELSE.
+                      lv_check = 'X'.
+                    ENDIF.
+                  ELSE.
+                    lv_check = 'X'.
+                  ENDIF.
+                ENDIF.
+              ENDIF.
+            ENDIF.
+
+            CHECK lv_check IS NOT INITIAL.
+            DATA : ls_itme TYPE  zcl_zsd_cust_fg_mpc=>ts_et_billitem.
+            DATA : ls_itme1 TYPE  zcl_zsd_cust_fg_mpc=>ts_et_billitem.
+            LOOP AT gt_dtl1 INTO DATA(lw_dtl) WHERE matnr = ls_st1-matnr.
+              lw_dtl-pkgno = lw_dtl-pkgno + ls_st1-pkgno.
+              IF lw_dtl-pkgno > lw_dtl-lfimg.
+                CONTINUE.
+              ELSE.
+                ls_itme  = CORRESPONDING #( lw_dtl ).
+                ls_itme-pkgno = lw_dtl-pkgno.
+                MODIFY ls_billdata-item FROM ls_itme TRANSPORTING pkgno
+                WHERE matnr = ls_st1-matnr
+                AND   vbeln = lw_dtl-vbeln
+                AND   posnr = lw_dtl-posnr.
+                ls_st1-vbeln = lw_dtl-vbeln.
+                ls_st1-posnr = lw_dtl-posnr.
+                ls_st1-flag  = 'X'.
+
+                ls_itme1  = CORRESPONDING #( ls_st1 ).
+                ls_itme1-flag  = 'X'.
+                MODIFY ls_billdata-item FROM ls_itme1 TRANSPORTING vbeln posnr flag
+              WHERE werks = ls_billdata-werks
+*                WHERE werks = p_werks1           "added by Avinash : 26.09.2025 : ECDK933195
+                AND   matnr = l_matnr
+                AND   kunnr = lv_kunnr1
+                AND   labno = lv_labno1.
+              ENDIF.
+              CLEAR lw_dtl.
+              EXIT.
+            ENDLOOP.
+
+          ELSE.
+
+            READ TABLE gt_st7 INTO  lw_st WITH KEY " werks =  p_werks1 "ls_billdata-werks    "added by Avinash : 26.09.2025 : ECDK933195
+                                                     matnr = l_matnr
+                                                     kunnr = l_kunnr  " nrp : 18.10.2024 : ECDK931883
+                                                     labno = lv_labno1 BINARY SEARCH.
+            IF sy-subrc = 0.
+              CALL METHOD lo_container->add_message
+                EXPORTING
+                  iv_msg_type               = /iwbep/cl_cos_logger=>error
+                  iv_msg_id                 = '00'
+                  iv_msg_number             = '000'
+                  iv_msg_text               = 'Already scanned...'
+                  iv_add_to_response_header = abap_true.
+
+              copy_data_to_ref( EXPORTING is_data = ls_billdata
+                                CHANGING  cr_data = er_deep_entity ).
+              EXIT.
+            ELSE.
+              READ TABLE gt_st INTO ls_st1 WITH KEY "werks = p_werks1"ls_billdata-werks  "by Avinash : 26.09.2025 : ECDK933195
+                                                         matnr = l_matnr
+                                                         kunnr = l_kunnr
+                                                         labno = lv_labno1 BINARY SEARCH.
+              IF sy-subrc NE 0.
+
+                CALL METHOD lo_container->add_message
+                  EXPORTING
+                    iv_msg_type               = /iwbep/cl_cos_logger=>error
+                    iv_msg_id                 = '00'
+                    iv_msg_number             = '000'
+                    iv_msg_text               = 'Scanned record not found...'
+                    iv_add_to_response_header = abap_true.
+
+                copy_data_to_ref( EXPORTING is_data = ls_billdata
+                                  CHANGING  cr_data = er_deep_entity ).
+                EXIT.
+              ELSE.
+                ln = sy-tabix.
+                IF ls_st1-flag = 'X'.
+                  CALL METHOD lo_container->add_message
+                    EXPORTING
+                      iv_msg_type               = /iwbep/cl_cos_logger=>error
+                      iv_msg_id                 = '00'
+                      iv_msg_number             = '000'
+                      iv_msg_text               = 'Already scanned...'
+                      iv_add_to_response_header = abap_true.
+
+                  copy_data_to_ref( EXPORTING is_data = ls_billdata
+                                    CHANGING  cr_data = er_deep_entity ).
+                  EXIT.
+                ELSE.
+                  SELECT SINGLE * FROM zsd_cust_fg_pk INTO @ls_pk
+*                  WHERE werks = @ls_billdata-werks
+                    WHERE werks = @ls_st-werks     "added by Avinash : 26.09.2025 : ECDK933195
+                    AND   matnr = @l_matnr
+                    AND   kunnr = @l_kunnr
+                    AND   kdmat = @ls_st-kdmat.
+                  IF ls_pk-tick2 = 'X'.
+                    IF ln NE 1.
+                      ln1 = ln - 1.
+                      READ TABLE gt_st7 INTO ls_st7 INDEX ln1.
+                      IF sy-subrc = 0 AND ls_st7-flag = '' AND ls_st7-matnr = l_matnr.
+                        lv_msg = | Please scan previous Label. { ls_st7-labno  }|.
+                        CALL METHOD lo_container->add_message
+                          EXPORTING
+                            iv_msg_type               = /iwbep/cl_cos_logger=>error
+                            iv_msg_id                 = '00'
+                            iv_msg_number             = '000'
+                            iv_msg_text               = lv_msg
+                            iv_add_to_response_header = abap_true.
+
+                        copy_data_to_ref( EXPORTING is_data = ls_billdata
+                                          CHANGING  cr_data = er_deep_entity ).
+                        EXIT.
+                      ELSE.
+                        lv_check = 'X'.
+                      ENDIF.
+                    ELSE.
+                      lv_check = 'X'.
+                    ENDIF.
+                  ELSE.
+                    lv_check = 'X'.
+                  ENDIF.
+                ENDIF.
+              ENDIF.
+            ENDIF.
+
+            CHECK lv_check IS NOT INITIAL.
+*            DATA : ls_itme TYPE  zcl_zsd_cust_fg_mpc=>ts_et_billitem.
+*            DATA : ls_itme1 TYPE  zcl_zsd_cust_fg_mpc=>ts_et_billitem.
+            LOOP AT gt_dtl1 INTO lw_dtl WHERE matnr = ls_st1-matnr.
+              lw_dtl-pkgno = lw_dtl-pkgno + ls_st1-pkgno.
+              IF lw_dtl-pkgno > lw_dtl-lfimg.
+                CONTINUE.
+              ELSE.
+                ls_itme  = CORRESPONDING #( lw_dtl ).
+                ls_itme-pkgno = lw_dtl-pkgno.
+                MODIFY ls_billdata-item FROM ls_itme TRANSPORTING pkgno
+                WHERE matnr = ls_st1-matnr
+                AND   vbeln = lw_dtl-vbeln
+                AND   posnr = lw_dtl-posnr.
+                ls_st1-vbeln = lw_dtl-vbeln.
+                ls_st1-posnr = lw_dtl-posnr.
+                ls_st1-flag  = 'X'.
+
+                ls_itme1  = CORRESPONDING #( ls_st1 ).
+                ls_itme1-flag  = 'X'.
+                MODIFY ls_billdata-item FROM ls_itme1 TRANSPORTING vbeln posnr flag
+*              WHERE werks = ls_billdata-werks
+                WHERE werks = p_werks1           "added by Avinash : 26.09.2025 : ECDK933195
+                AND   matnr = l_matnr
+                AND   kunnr = lv_kunnr1
+                AND   labno = lv_labno1.
+              ENDIF.
+              CLEAR lw_dtl.
+              EXIT.
+            ENDLOOP.
+          ENDIF.
+
+          copy_data_to_ref( EXPORTING is_data = ls_billdata
+                            CHANGING  cr_data = er_deep_entity ).
+
+          EXIT.
+
+        ENDIF.
+
+      ELSE. " for data posting
+
+
+
+
+
+
+
+
+        DATA: ls_sales_order TYPE zcl_zford_service_mpc_ext=>ty_deep_so,
+              lt_item        TYPE TABLE OF zcl_zford_service_mpc_ext=>ts_zbillingitem,
+              ls_header      TYPE zcl_zford_service_mpc_ext=>ts_zbillingheader.
+
+        DATA: lv_billdoc TYPE vbeln.
+
+        DATA: lo_message_container
+                 TYPE REF TO /iwbep/if_message_container.
+
+
+        CALL METHOD io_data_provider->read_entry_data
+          IMPORTING
+            es_data = ls_billdata.
+
+
+*        LOOP AT ls_billdata-item INTO DATA(lwa_item). "replace by avinash:01.06.2026:ECDK933975
+        LOOP AT ls_billdata-item INTO DATA(lwa_item) WHERE matnr = lv_matnr and kunnr = lv_kunnr1 and labno = lv_labno1..
+          IF lwa_item-tabname = 'GT_DTL'.
+            CLEAR lwa_dtl.
+            " Setting radio button value passed from front end
+            IF lwa_item-flag = '0'.
+              r1 = 'X'.
+            ELSEIF lwa_item-flag = '1'.
+              r2 = 'X'.
+            ENDIF.
+            lwa_dtl-werks = lwa_item-werks.
+            lwa_dtl-matnr = lwa_item-matnr.
+            lwa_dtl-pkgno = lwa_item-pkgno.
+
+            lwa_dtl-vbeln = lwa_item-vbeln.
+            p_vbeln = lwa_item-vbeln.
+            lwa_dtl-maktx = lwa_item-maktx.
+            lwa_dtl-lfimg = lwa_item-lfimg.
+            lwa_dtl-meins = lwa_item-meins.
+            lwa_dtl-posnr = lwa_item-posnr.
+            APPEND lwa_dtl TO gt_dtl1.
+
+          ELSEIF lwa_item-tabname = 'GT_ST'.
+            CLEAR lwa_st.
+            lwa_st-werks = lwa_item-werks.
+            lwa_st-matnr = lwa_item-matnr.
+            lwa_st-pkgno = lwa_item-pkgno.
+            lwa_st-labno = lwa_item-labno.
+            lwa_st-vbeln = lwa_item-vbeln.
+            lwa_st-posnr = lwa_item-posnr.
+            lwa_st-flag = lwa_item-flag.
+            lv_kunnr =  lwa_item-kunnr.
+            lv_kunnr = |{ lv_kunnr ALPHA = IN }|.
+            lwa_st-kunnr = lv_kunnr.
+
+            APPEND lwa_st TO gt_st.
+          ELSEIF lwa_item-tabname = 'GT_ST7'.
+            CLEAR lwa_st7.
+            lwa_st7-werks = lwa_item-werks.
+            lwa_st7-matnr = lwa_item-matnr.
+            lwa_st7-pkgno = lwa_item-pkgno.
+            lwa_st7-labno = lwa_item-labno.
+            lwa_st7-vbeln = lwa_item-vbeln.
+            lwa_st7-posnr = lwa_item-posnr.
+            lwa_st7-flag = lwa_item-flag.
+            lv_kunnr =  lwa_item-kunnr.
+            lv_kunnr = |{ lv_kunnr ALPHA = IN }|.
+            lwa_st7-kunnr = lv_kunnr.
+
+            APPEND lwa_st7 TO gt_st7.
+          ENDIF.
+          CLEAR lv_kunnr.
+        ENDLOOP.
+
+        "park and submit validation.
+
+        READ TABLE ls_billdata-item INTO DATA(lwa_items) INDEX 1 .
+        IF ls_billdata-item IS NOT INITIAL.
+
+
+          IF lwa_items-pstyv = '0'.
+            IF r1 = 'X'.
+
+              header_data-deliv_numb    = p_vbeln.
+              header_data-route         = space.            " Remove route
+
+              header_control-deliv_numb = p_vbeln.
+              header_control-route_flg  = 'X'.
+
+              delivery                  = p_vbeln.
+              techn_control-upd_ind     = 'U'.
+
+              CALL FUNCTION 'BAPI_OUTB_DELIVERY_CHANGE'
+                EXPORTING
+                  header_data    = header_data
+                  header_control = header_control
+                  delivery       = delivery
+                  techn_control  = techn_control
+                TABLES
+                  return         = return.
+              IF return[] IS INITIAL.
+                CALL FUNCTION 'BAPI_TRANSACTION_COMMIT'
+                  EXPORTING
+                    wait = 'X'.
+
+                flg = 'X'.
+              ELSE.
+                flg = space.
+              ENDIF.
+              REFRESH : return.
+              CLEAR : header_data, header_control, delivery, techn_control.
+
+              " Post goods issue for delivery
+              IF flg = 'X'.
+                DATA : pi_deliv_numb TYPE wiso_dlvhd-deliv_numb,
+                       pe_return1    TYPE bapireturn1,
+                       pe_gi_blocked TYPE wiso_hndl-xfield.
+
+                pi_deliv_numb = p_vbeln.
+
+                CALL FUNCTION 'CSO_P_DLVRY_GOODS_ISSUE_CREATE'
+                  EXPORTING
+                    pi_deliv_numb = pi_deliv_numb
+                  IMPORTING
+                    pe_return1    = pe_return1
+                    pe_gi_blocked = pe_gi_blocked.
+                IF pe_return1 IS INITIAL.
+
+                  REFRESH : bdcdata[], messtab[].
+                  CLEAR bdcdata.
+
+                  CLEAR lwa_bdcdata.
+                  lwa_bdcdata-program  = 'SAPMV60A'.
+                  lwa_bdcdata-dynpro   = '0102'.
+                  lwa_bdcdata-dynbegin = 'X'.
+                  APPEND lwa_bdcdata TO bdcdata.
+
+                  CLEAR lwa_bdcdata.
+                  lwa_bdcdata-fnam = 'BDC_CURSOR'.
+                  lwa_bdcdata-fval = 'KOMFK-VBELN(01)'.
+                  CONDENSE lwa_bdcdata-fval.
+                  APPEND lwa_bdcdata TO bdcdata.
+
+
+                  CLEAR lwa_bdcdata.
+                  lwa_bdcdata-fnam = 'BDC_OKCODE'.
+                  lwa_bdcdata-fval = '/00'.
+                  CONDENSE lwa_bdcdata-fval.
+                  APPEND lwa_bdcdata TO bdcdata.
+
+                  CLEAR lwa_bdcdata.
+                  lwa_bdcdata-fnam = 'KOMFK-VBELN(01)'.
+                  lwa_bdcdata-fval = p_vbeln.
+                  CONDENSE lwa_bdcdata-fval.
+                  APPEND lwa_bdcdata TO bdcdata.
+                  .        "
+                  CLEAR lwa_bdcdata.
+                  lwa_bdcdata-program  = 'SAPMV60A'.
+                  lwa_bdcdata-dynpro   = '0104'.
+                  lwa_bdcdata-dynbegin = 'X'.
+                  APPEND lwa_bdcdata TO bdcdata.
+
+                  CLEAR lwa_bdcdata.
+                  lwa_bdcdata-fnam = 'BDC_CURSOR'.
+                  lwa_bdcdata-fval = 'VBRK-FKART'.
+                  CONDENSE lwa_bdcdata-fval.
+                  APPEND lwa_bdcdata TO bdcdata.
+
+                  CLEAR lwa_bdcdata.
+                  lwa_bdcdata-fnam = 'BDC_OKCODE'.
+                  lwa_bdcdata-fval = '=SICH'.
+                  CONDENSE lwa_bdcdata-fval.
+                  APPEND lwa_bdcdata TO bdcdata.
+
+
+                  WAIT UP TO 1 SECONDS.
+                  opt-dismode = 'N'.
+                  opt-updmode = 'S'.
+                  opt-defsize = 'X'.
+
+                  CALL TRANSACTION 'VF01'
+                                   USING bdcdata
+                                   OPTIONS  FROM opt
+                                   MESSAGES INTO messtab.
+                  COMMIT WORK AND WAIT.
+
+
+                  READ TABLE messtab INTO lwa_messtab WITH KEY msgtyp = 'S'
+                                              msgnr  = '311'.
+                  IF sy-subrc = 0.
+
+                    CONCATENATE 'Billing document created...' lwa_messtab-msgv1 INTO lv_msg.
+                    lv_billdoc = lwa_messtab-msgv1.
+                    CALL METHOD lo_container->add_message
+                      EXPORTING
+                        iv_msg_type               = /iwbep/cl_cos_logger=>success
+                        iv_msg_id                 = '00'
+                        iv_msg_number             = '000'
+                        iv_msg_text               = lv_msg
+                        iv_add_to_response_header = abap_true.
+                    copy_data_to_ref( EXPORTING is_data = ls_billdata
+                                      CHANGING  cr_data = er_deep_entity ).
+*                                                 exit.
+                    DATA lv_vbeln TYPE vbrk-vbeln.
+                    CALL FUNCTION 'CONVERSION_EXIT_ALPHA_INPUT'
+                      EXPORTING
+                        input  = lwa_messtab-msgv1
+                      IMPORTING
+                        output = lv_vbeln.
+
+                    LOOP AT gt_st INTO DATA(ls_st2) WHERE flag = 'X'.
+                      UPDATE zsd_cust_fg_st SET vbeln = ls_st-vbeln
+                                                lfdat = sy-datum
+                                                vbelv = lv_vbeln
+                      WHERE werks = ls_st2-werks
+                      AND   matnr = ls_st2-matnr
+                      AND   labno = ls_st2-labno.
+                      CLEAR ls_st.
+                    ENDLOOP.
+
+                    LOOP AT gt_st7 INTO ls_st2.
+                      UPDATE zsd_cust_fg_st SET vbeln = ls_st2-vbeln
+                                                lfdat = sy-datum
+                                                vbelv = lv_vbeln
+                      WHERE werks = ls_st2-werks
+                      AND   matnr = ls_st2-matnr
+                      AND   labno = ls_st1-labno.
+                      CLEAR ls_st.
+                    ENDLOOP.
+                    EXIT.
+                  ELSE.
+
+                    READ TABLE messtab INTO DATA(lw_messtab) WITH KEY msgtyp = 'E'.
+                    CALL FUNCTION 'FORMAT_MESSAGE'
+                      EXPORTING
+                        id   = lw_messtab-msgid
+                        lang = 'EN'
+                        no   = lw_messtab-msgnr
+                        v1   = lw_messtab-msgv1
+                        v2   = lw_messtab-msgv2
+                        v3   = lw_messtab-msgv3
+                        v4   = lw_messtab-msgv4
+                      IMPORTING
+                        msg  = lv_msg.
+
+
+                    CALL METHOD lo_container->add_message
+                      EXPORTING
+                        iv_msg_type               = /iwbep/cl_cos_logger=>error
+                        iv_msg_id                 = '00'
+                        iv_msg_number             = '000'
+                        iv_msg_text               = lv_msg
+                        iv_add_to_response_header = abap_true.
+                    copy_data_to_ref( EXPORTING is_data = ls_billdata
+                                      CHANGING  cr_data = er_deep_entity ).
+                    EXIT.
+
+                  ENDIF.
+                ELSE.
+                  IF pe_return1-type = 'E'.
+
+                    lv_msg = pe_return1-message.
+                    CALL METHOD lo_container->add_message
+                      EXPORTING
+                        iv_msg_type               = /iwbep/cl_cos_logger=>error
+                        iv_msg_id                 = '00'
+                        iv_msg_number             = '000'
+                        iv_msg_text               = lv_msg
+                        iv_add_to_response_header = abap_true.
+                    copy_data_to_ref( EXPORTING is_data = ls_billdata
+                                      CHANGING  cr_data = er_deep_entity ).
+                    EXIT.
+                  ENDIF.
+                ENDIF.
+              ENDIF.
+            ENDIF.
+            IF r2 = 'X'.
+
+              REFRESH : bdcdata[], messtab[].
+              CLEAR bdcdata.
+
+              DATA l_vbeln TYPE likp-vbeln.
+              DATA: p_werks TYPE werks_d,
+                    p_vkorg TYPE tvko-vkorg,
+                    p_lifnr TYPE lfa1-lifnr,
+                    p_vehno TYPE vttk-exti1.
+              " Shipping point
+
+              p_werks = lwa_items-werks.
+              p_vkorg = '1100'.
+              p_lifnr = lwa_items-lifnr.
+              p_lifnr = |{ p_lifnr ALPHA = IN }|.
+              p_vehno = lwa_items-vehno.
+              SELECT SINGLE vstel FROM tvswz INTO @DATA(l_vstel)
+                WHERE werks = @p_werks.
+
+              " Get single Delivery number
+              DATA(lt_dtl) = gt_dtl1[].
+              SORT lt_dtl BY vbeln.
+              DELETE ADJACENT DUPLICATES FROM lt_dtl COMPARING vbeln.
+              LOOP AT lt_dtl  INTO DATA(lw_dtl1).
+                IF lw_dtl1-lfimg NE lw_dtl1-pkgno.
+                      CALL METHOD lo_container->add_message
+                        EXPORTING
+                          iv_msg_type               = /iwbep/cl_cos_logger=>error
+                          iv_msg_id                 = '00'
+                          iv_msg_number             = '000'
+                          iv_msg_text               = 'Still all qty not scanned.'
+                          iv_add_to_response_header = abap_true.
+
+                      copy_data_to_ref( EXPORTING is_data = ls_billdata
+                                        CHANGING  cr_data = er_deep_entity ).
+              DATA(lv_mark) = 'X'.
+                  EXIT.
+
+                ENDIF.
+              ENDLOOP.
+              IF lv_mark = 'X'.
+               exit.
+              ENDIF.
+              READ TABLE lt_dtl INTO DATA(ls_dtl1) INDEX 1.
+              l_vbeln = ls_dtl1-vbeln.
+
+
+              DATA: lwa_itemdata       TYPE bapishipmentitem,
+                    lt_itemdata        TYPE TABLE OF bapishipmentitem,
+                    headerdata         TYPE bapishipmentheader,
+                    lt_return          TYPE TABLE OF bapiret2,
+                    lwa_transport      TYPE bapishipmentids-shipmentnum,
+                    lv_shipmentguid    TYPE bapishipmentids-guid,
+                    lwa_itemonstage    TYPE bapishipmentitemonstage,
+                    lt_itemonstage     TYPE TABLE OF bapishipmentitemonstage,
+                    lwa_headerdeadline TYPE bapishipmentheaderdeadline,
+                    lt_headerdeadline  TYPE TABLE OF bapishipmentheaderdeadline,
+                    lv_datetime        TYPE tzntstmps.
+
+              SELECT SINGLE route FROM likp WHERE vbeln = @ls_billdata-vbeln INTO @DATA(lv_route).
+
+              headerdata-trans_plan_pt = p_vkorg.
+              headerdata-shipment_type = 'Z001'.
+              headerdata-service_agent_id = p_lifnr.
+              headerdata-external_id_1 = p_vehno.
+              headerdata-shipment_route = lv_route.
+              headerdata-suppl_1 = lwa_items-vehtype.
+              headerdata-suppl_2 = lwa_items-loadtype.
+              headerdata-suppl_3 = lwa_items-modetrpt.
+
+              LOOP AT ls_billdata-item INTO DATA(lwa_deliveries).
+                lwa_itemdata-delivery = lwa_deliveries-vbeln.
+                APPEND lwa_itemdata TO lt_itemdata.
+
+                lwa_itemonstage-delivery = lwa_deliveries-vbeln.
+                APPEND lwa_itemonstage TO lt_itemonstage.
+              ENDLOOP.
+
+              DELETE lt_itemdata WHERE delivery = ''.
+              DELETE lt_itemonstage WHERE delivery = ''.
+              SORT lt_itemdata BY delivery.
+              SORT lt_itemonstage BY delivery.
+              DELETE ADJACENT DUPLICATES FROM lt_itemdata COMPARING delivery.
+              DELETE ADJACENT DUPLICATES FROM lt_itemonstage COMPARING delivery.
+
+              GET TIME STAMP FIELD lv_datetime.
+              lwa_headerdeadline-time_type = 'HDRSTPLDT'.
+              lwa_headerdeadline-time_stamp_utc = lv_datetime.
+              lwa_headerdeadline-time_zone = 'UTC'.
+              APPEND lwa_headerdeadline TO lt_headerdeadline.
+              CLEAR lwa_headerdeadline.
+
+              lwa_headerdeadline-time_type = 'HDRSTCIADT'.
+              lwa_headerdeadline-time_stamp_utc = lv_datetime.
+              lwa_headerdeadline-time_zone = 'UTC'.
+              APPEND lwa_headerdeadline TO lt_headerdeadline.
+              CLEAR lwa_headerdeadline.
+
+              lwa_headerdeadline-time_type = 'HDRSTLSADT'.
+              lwa_headerdeadline-time_stamp_utc = lv_datetime.
+              lwa_headerdeadline-time_zone = 'UTC'.
+              APPEND lwa_headerdeadline TO lt_headerdeadline.
+              CLEAR lwa_headerdeadline.
+
+              lwa_headerdeadline-time_type = 'HDRSTLEADT'.
+              lwa_headerdeadline-time_stamp_utc = lv_datetime.
+              lwa_headerdeadline-time_zone = 'UTC'.
+              APPEND lwa_headerdeadline TO lt_headerdeadline.
+              CLEAR lwa_headerdeadline.
+
+              lwa_headerdeadline-time_type = 'HDRSTCADT'.
+              lwa_headerdeadline-time_stamp_utc = lv_datetime.
+              lwa_headerdeadline-time_zone = 'UTC'.
+              APPEND lwa_headerdeadline TO lt_headerdeadline.
+              CLEAR lwa_headerdeadline.
+
+              lwa_headerdeadline-time_type = 'HDRSTSSADT'.
+              lwa_headerdeadline-time_stamp_utc = lv_datetime.
+              lwa_headerdeadline-time_zone = 'UTC'.
+              APPEND lwa_headerdeadline TO lt_headerdeadline.
+              CLEAR lwa_headerdeadline.
+
+              CALL FUNCTION 'BAPI_SHIPMENT_CREATE'
+                EXPORTING
+                  headerdata     = headerdata
+                IMPORTING
+                  transport      = lwa_transport
+                  shipmentguid   = lv_shipmentguid
+                TABLES
+                  headerdeadline = lt_headerdeadline
+                  itemdata       = lt_itemdata
+*                 STAGEDATA      =
+*                 STAGEDEADLINE  =
+*                 itemonstage    = lt_itemonstage
+*                 ADDRESS        =
+*                 HDUNHEADER     =
+*                 HDUNITEM       =
+                  return         = lt_return.
+
+*              COMMIT WORK AND WAIT.
+
+              CALL FUNCTION 'BAPI_TRANSACTION_COMMIT'
+                EXPORTING
+                  wait = 'X'
+*        IMPORTING
+*                 RETURN        =
+                .
+
+              WAIT UP TO 1 SECONDS.
+
+
+
+
+              DELETE messtab WHERE msgtyp = 'S'.
+              DELETE messtab WHERE msgtyp = 'W'.
+
+              DATA flag(1) TYPE c.
+              IF messtab[] IS INITIAL.
+                LOOP AT lt_dtl INTO ls_dtl1.
+                  SELECT SINGLE vbeln FROM vbfa INTO @DATA(ls_shipno)
+                    WHERE vbelv = @ls_dtl1-vbeln
+                    AND   vbtyp_n = '8'.
+                  IF sy-subrc = 0.
+                    flag = 'X'.
+                    SELECT SINGLE vbeln FROM vbfa INTO @DATA(ls_vbeln)
+                      WHERE vbelv = @ls_dtl1-vbeln
+                      AND   vbtyp_n = 'M'.
+                    IF sy-subrc = 0.
+                    ELSE.
+
+                      CALL METHOD lo_container->add_message
+                        EXPORTING
+                          iv_msg_type               = /iwbep/cl_cos_logger=>error
+                          iv_msg_id                 = '00'
+                          iv_msg_number             = '000'
+                          iv_msg_text               = 'Error in Billing docment creation'
+                          iv_add_to_response_header = abap_true.
+
+                      copy_data_to_ref( EXPORTING is_data = ls_billdata
+                                        CHANGING  cr_data = er_deep_entity ).
+
+                    ENDIF.
+                  ELSE.
+
+                    CALL METHOD lo_container->add_message
+                      EXPORTING
+                        iv_msg_type               = /iwbep/cl_cos_logger=>error
+                        iv_msg_id                 = '00'
+                        iv_msg_number             = '000'
+                        iv_msg_text               = 'Error in shipment creation'
+                        iv_add_to_response_header = abap_true.
+
+                    copy_data_to_ref( EXPORTING is_data = ls_billdata
+                                      CHANGING  cr_data = er_deep_entity ).
+                  ENDIF.
+
+
+                  IF flag = 'X'.
+
+                    LOOP AT gt_st INTO ls_st2 WHERE flag = 'X' AND vbeln = ls_dtl1-vbeln.
+
+                      CALL FUNCTION 'CONVERSION_EXIT_MATN1_INPUT'
+                        EXPORTING
+                          input  = ls_st2-matnr
+                        IMPORTING
+                          output = ls_st2-matnr.
+
+                      UPDATE zsd_cust_fg_st SET vbeln = ls_st2-vbeln
+                                                lfdat = sy-datum
+                                                vbelv = ls_vbeln
+                                            WHERE werks = ls_st2-werks
+                                            AND   matnr = ls_st2-matnr
+                                            AND   labno = ls_st2-labno
+                                            AND   kunnr = ls_st2-kunnr.
+                      CLEAR ls_st2.
+                    ENDLOOP.
+                    LOOP AT gt_st7 INTO ls_st2 WHERE vbeln = ls_dtl1-vbeln..
+                      CALL FUNCTION 'CONVERSION_EXIT_MATN1_INPUT'
+                        EXPORTING
+                          input  = ls_st2-matnr
+                        IMPORTING
+                          output = ls_st2-matnr.
+                      UPDATE zsd_cust_fg_st SET vbeln = ls_st2-vbeln
+                                                lfdat = sy-datum
+                                                vbelv = ls_vbeln
+                                            WHERE werks = ls_st2-werks
+                                            AND   matnr = ls_st2-matnr
+                                            AND   labno = ls_st2-labno
+                                            AND kunnr = ls_st2-kunnr..
+                      CLEAR ls_st2.
+                    ENDLOOP.
+
+
+                    CONCATENATE 'Billing document created...' ls_vbeln INTO lv_msg.
+
+
+                    CALL METHOD lo_container->add_message
+                      EXPORTING
+                        iv_msg_type               = /iwbep/cl_cos_logger=>success
+                        iv_msg_id                 = '00'
+                        iv_msg_number             = '000'
+                        iv_msg_text               = lv_msg
+                        iv_add_to_response_header = abap_true.
+
+                    copy_data_to_ref( EXPORTING is_data = ls_billdata
+                                      CHANGING  cr_data = er_deep_entity ).
+
+                  ENDIF.
+                  CLEAR ls_dtl.
+                  CLEAR : ls_shipno, ls_vbeln.
+                ENDLOOP.
+
+              ENDIF.
+            ENDIF.
+          ELSEIF lwa_items-pstyv = ' '.
+            LOOP AT gt_st INTO ls_st2 WHERE flag = 'X'.
+
+              CALL FUNCTION 'CONVERSION_EXIT_MATN1_INPUT'
+                EXPORTING
+                  input  = ls_st2-matnr
+                IMPORTING
+                  output = ls_st2-matnr.
+
+              UPDATE zsd_cust_fg_st SET vbeln = ls_st2-vbeln
+                                    WHERE werks = ls_st2-werks
+                                    AND   matnr = ls_st2-matnr
+                                    AND   kunnr = ls_st2-kunnr
+                                    AND   labno = ls_st2-labno.
+              CLEAR ls_st.
+            ENDLOOP.
+            CALL METHOD lo_container->add_message
+              EXPORTING
+                iv_msg_type               = /iwbep/cl_cos_logger=>success
+                iv_msg_id                 = '00'
+                iv_msg_number             = '000'
+                iv_msg_text               = 'Data Park succefully'
+                iv_add_to_response_header = abap_true.
+
+            copy_data_to_ref( EXPORTING is_data = ls_billdata
+                              CHANGING  cr_data = er_deep_entity ).
+          ENDIF.
+        ENDIF.
+
+        READ TABLE ls_billdata-item INTO lwa_item INDEX 1.
+        IF sy-subrc EQ 0.
+          lwa_item-vbelv = lv_billdoc.
+          MODIFY ls_billdata-item FROM lwa_item INDEX 1
+          TRANSPORTING vbelv .
+        ENDIF.
+
+        CALL METHOD me->copy_data_to_ref
+          EXPORTING
+            is_data = ls_billdata
+          CHANGING
+            cr_data = er_deep_entity.
+      ENDIF.
+    ENDIF.
+  ENDMETHOD.
+
+
+  method /IWBEP/IF_MGW_APPL_SRV_RUNTIME~GET_STREAM.
+
+    DATA(it_keys) = io_tech_request_context->get_keys( ).
+    DATA(lv_key) = VALUE #( it_keys[ 1 ]-value OPTIONAL ).
+    DATA :
+      lv_fm_name            TYPE rs38l_fnam,
+      lv_labno              TYPE zlabno,
+      lv_matnr              TYPE matnr,
+      lv_kunnr              TYPE kunnr,
+      lv_pkgno              TYPE zpkgno,
+      lv_kdmat              TYPE kdmat,
+      ls_output_options     TYPE ssfcompop,
+      lv_language           TYPE tdspras,
+      ls_control_parameters TYPE ssfctrlop,
+      ls_output_data        TYPE ssfcrescl,
+      lv_pdf_len            TYPE i,
+      lv_pdf_xstring        TYPE xstring,
+      lt_lines              TYPE TABLE OF tline,
+      lv_devtype            TYPE rspoptype,
+      lv_app_type           TYPE string,
+      lv_guid               TYPE guid_32,
+      lo_cached_response    TYPE REF TO if_http_response,
+      lt_tstotf             TYPE tsfotf,
+      ls_job_output_info TYPE ssfcrescl.
+
+    READ TABLE it_keys WITH KEY name = 'LABNO' INTO DATA(ls_key).
+    lv_labno = ls_key-value.
+    READ TABLE it_keys WITH KEY name = 'MATNR' INTO DATA(ls_key1).
+    lv_matnr = ls_key1-value.
+    READ TABLE it_keys WITH KEY name = 'PKGNO' INTO DATA(ls_key2).
+    lv_pkgno = ls_key2-value.
+    READ TABLE it_keys WITH KEY name = 'KDMAT' INTO DATA(ls_key3).
+    lv_kdmat = ls_key3-value.
+    READ TABLE it_keys WITH KEY name = 'KUNNR' INTO DATA(ls_key4).
+    lv_kunnr = ls_key4-value.
+
+    IF lv_key IS NOT INITIAL.
+
+* language
+      lv_language = sy-langu.
+
+      TRANSLATE lv_language TO UPPER CASE.
+      ls_control_parameters-langu = lv_language.
+
+* set control parameters to get the output text format (OTF) from Smart Forms
+      ls_control_parameters-no_dialog = abap_true.
+      ls_control_parameters-getotf    = abap_true.
+      ls_control_parameters-preview = space. "No preview
+
+
+* get device type from language
+      CALL FUNCTION 'SSF_GET_DEVICE_TYPE'
+        EXPORTING
+          i_language             = lv_language
+*         i_application          = 'SAPDEFAULT'
+        IMPORTING
+          e_devtype              = lv_devtype
+        EXCEPTIONS
+          no_language            = 1
+          language_not_installed = 2
+          no_devtype_found       = 3
+          system_error           = 4
+          OTHERS                 = 5.
+
+* set device type in output options
+      ls_output_options-tdprinter = lv_devtype.
+* Set relevant output options
+      ls_output_options-tdnewid  = 'X'. "Print parameters,
+      ls_output_options-tddelete = space. "Print parameters
+      ls_output_options-tddest = 'LP01'.
+
+      CALL FUNCTION 'SSF_FUNCTION_MODULE_NAME'
+        EXPORTING
+*          formname           = 'ZSD_CUST_LABEL_FORM'  "Smartform name
+          formname           = 'ZSD_CUST_LABEL_FORM_FIORI'  "Smartform name
+        IMPORTING
+          fm_name            = lv_fm_name
+        EXCEPTIONS
+          no_form            = 1
+          no_function_module = 2
+          OTHERS             = 3.
+
+
+      CALL FUNCTION lv_fm_name
+        EXPORTING
+          control_parameters = ls_control_parameters
+          output_options     = ls_output_options
+          user_settings      = space
+          e_matnr            = lv_matnr
+          e_kdmat            = lv_kdmat
+          e_kunnr            = lv_kunnr
+          e_pkgno            = lv_pkgno
+          e_labno            = lv_labno
+ IMPORTING
+
+         JOB_OUTPUT_INFO    = ls_job_output_info
+
+        EXCEPTIONS
+          formatting_error   = 1
+          internal_error     = 2
+          send_error         = 3
+          user_canceled      = 4
+          OTHERS             = 5.
+
+      APPEND LINES OF ls_job_output_info-otfdata[] TO lt_tstotf[].
+
+* convert to otf
+      CALL FUNCTION 'CONVERT_OTF'
+        EXPORTING
+          format                = 'PDF'
+        IMPORTING
+          bin_filesize          = lv_pdf_len
+          bin_file              = lv_pdf_xstring       " binary file
+        TABLES
+          otf                   = lt_tstotf
+          lines                 = lt_lines
+        EXCEPTIONS
+          err_max_linewidth     = 1
+          err_format            = 2
+          err_conv_not_possible = 3
+          err_bad_otf           = 4
+          OTHERS                = 5.
+      IF sy-subrc <> 0.
+*   error handling
+
+      ENDIF.
+
+      DATA(ls_s_media_resource) = VALUE ty_s_media_resource( mime_type = 'application/pdf'
+                                                             value     = lv_pdf_xstring ).
+
+      copy_data_to_ref(
+        EXPORTING
+          is_data = ls_s_media_resource
+        CHANGING
+          cr_data = er_stream
+      ).
+    ENDIF.
+
+
+ endmethod.
+
+
+  method /IWBEP/IF_MGW_CORE_SRV_RUNTIME~CHANGESET_BEGIN.
+
+**TRY.
+*CALL METHOD SUPER->/IWBEP/IF_MGW_CORE_SRV_RUNTIME~CHANGESET_BEGIN
+*  EXPORTING
+*    IT_OPERATION_INFO   =
+**    it_changeset_input  =
+**    io_changeset_helper =
+**  CHANGING
+**    cv_defer_mode       =
+*    .
+**  CATCH /iwbep/cx_mgw_busi_exception.
+**  CATCH /iwbep/cx_mgw_tech_exception.
+**ENDTRY.
+  endmethod.
+
+
+  method /IWBEP/IF_MGW_CORE_SRV_RUNTIME~CHANGESET_END.
+
+  endmethod.
+
+
+  METHOD et_billdataset_get_entityset.
+    TYPES : BEGIN OF gty_lips,
+              vbeln TYPE lips-vbeln,
+              posnr TYPE lips-posnr,
+              matnr TYPE lips-matnr,
+              werks TYPE lips-werks,
+              kdmat TYPE lips-kdmat,
+              kunag TYPE likp-kunag,
+              lfimg TYPE lips-lfimg,
+              meins TYPE lips-meins,
+              vgbel TYPE lips-vgbel,
+              vgpos TYPE lips-vgpos,
+              vtweg TYPE lips-vtweg,
+              spart TYPE lips-spart,
+              vstel TYPE likp-vstel,
+              lgort TYPE lips-lgort,      " Avinash : 26.09.2025 : ECDK933195
+            END OF gty_lips.
+
+    TYPES : BEGIN OF gty_dtl.
+              INCLUDE TYPE gty_lips.
+    TYPES :   maktx TYPE makt-maktx,
+              pkgno TYPE lips-lfimg,
+              mark  TYPE boolean,
+            END OF gty_dtl.
+
+    TYPES : BEGIN OF gty_st,
+              werks   TYPE zsd_cust_fg_st-werks,
+              matnr   TYPE zsd_cust_fg_st-matnr,
+              kunnr   TYPE kunnr,
+*              kdmat   TYPE zsd_cust_fg_st-kdmat,
+              pkgno   TYPE zsd_cust_fg_st-pkgno,
+              labno   TYPE zsd_cust_fg_st-labno,
+              flag(1) TYPE c,
+              vbeln   TYPE lips-vbeln,
+              posnr   TYPE lips-posnr,
+
+            END OF gty_st.
+
+    DATA : gt_lips TYPE STANDARD TABLE OF gty_lips,
+           gt_dtl  TYPE STANDARD TABLE OF gty_dtl.
+
+    DATA : gt_st  TYPE STANDARD TABLE OF gty_st,
+           gt_st7 TYPE STANDARD TABLE OF gty_st.
+*- Work area declaration
+    DATA : gw_dtl TYPE gty_dtl.
+
+    DATA: wa_key                   TYPE /iwbep/s_mgw_name_value_pair,
+          ls_filter_select_options TYPE /iwbep/s_mgw_select_option,
+          ls_select_option         TYPE /iwbep/s_cod_select_option,
+          lt_select_options        TYPE /iwbep/t_cod_select_options,
+          es_entity                LIKE LINE OF et_entityset.
+
+    TYPES: ty_rng_vkorg TYPE RANGE OF vkorg,
+           ty_rng_vbeln TYPE RANGE OF vbeln,
+           ty_rng_werks TYPE RANGE OF werks,
+           ty_rng_lifnr TYPE RANGE OF lifnr,
+           ty_rng_vehno TYPE RANGE OF exti1.
+
+    DATA:
+      rng_vkorg    TYPE ty_rng_vkorg,
+      wa_rng_vkorg TYPE LINE OF ty_rng_vkorg,
+
+      rng_vbeln    TYPE ty_rng_vbeln,
+      wa_rng_vbeln TYPE LINE OF ty_rng_vbeln,
+
+      rng_werks    TYPE ty_rng_werks,
+      wa_rng_werks TYPE LINE OF ty_rng_werks,
+
+      rng_lifnr    TYPE ty_rng_lifnr,
+      wa_rng_lifnr TYPE LINE OF ty_rng_lifnr,
+
+      rng_vehno    TYPE ty_rng_vehno,
+      wa_rng_vehno TYPE LINE OF ty_rng_vehno.
+
+    DATA: lo_message_container
+             TYPE REF TO /iwbep/if_message_container.
+
+    DATA: p_werks  TYPE werks_d,
+          p_vkorg  TYPE vkorg,
+          p_vbeln  TYPE likp-vbeln,
+          p_lifnr  TYPE lfa1-lifnr,
+          p_vehno  TYPE vttk-exti1,
+          lv_vbeln TYPE vbeln.
+
+    DATA : gv_ewh(1) TYPE c.    " nrp : 26.09.2025
+    DATA: r1 TYPE c,
+          r2 TYPE c.
+    DATA gv_vstel TYPE likp-vstel.
+    p_vkorg = '1100'. " remove hardconding by passing from frontend
+
+    lo_message_container = me->mo_context->get_message_container( ).
+* Validate Sales organization
+    READ TABLE it_filter_select_options INTO ls_filter_select_options WITH KEY property = 'VKORG'.
+    IF ls_filter_select_options-property IS NOT INITIAL.
+      lt_select_options[] =  ls_filter_select_options-select_options[].
+
+      LOOP AT lt_select_options INTO ls_select_option.
+
+        wa_rng_vkorg-sign = ls_select_option-sign.
+        wa_rng_vkorg-option = ls_select_option-option.
+        wa_rng_vkorg-low = ls_select_option-low.
+        wa_rng_vkorg-high = ls_select_option-high.
+        APPEND wa_rng_vkorg TO rng_vkorg.
+
+        p_vkorg = wa_rng_vkorg-low.
+        SELECT SINGLE vkorg FROM tvko INTO @DATA(ls_vkorg)
+    WHERE vkorg = @p_vkorg.
+        IF sy-subrc NE 0.
+
+          CALL METHOD lo_message_container->add_message
+            EXPORTING
+              iv_msg_type               = /iwbep/cl_cos_logger=>error
+              iv_msg_id                 = '00'
+              iv_msg_number             = '000'
+              iv_msg_text               = 'Invalid Sales Organisation....'
+              iv_add_to_response_header = abap_true.
+          DATA(flag) = 'X'.
+        ENDIF.
+        CLEAR: ls_select_option, wa_rng_vbeln.
+      ENDLOOP.
+    ENDIF.
+
+
+
+* Validate plant
+    READ TABLE it_filter_select_options INTO ls_filter_select_options WITH KEY property = 'WERKS'.
+    IF ls_filter_select_options-property IS NOT INITIAL.
+      lt_select_options[] =  ls_filter_select_options-select_options[].
+
+      LOOP AT lt_select_options INTO ls_select_option.
+
+        wa_rng_werks-sign = ls_select_option-sign.
+        wa_rng_werks-option = ls_select_option-option.
+        wa_rng_werks-low = ls_select_option-low.
+        wa_rng_werks-high = ls_select_option-high.
+        APPEND wa_rng_werks TO rng_werks.
+
+        p_werks = wa_rng_werks-low.
+
+        SELECT SINGLE 'X' FROM tvarvc INTO @gv_ewh
+        WHERE name = 'S_EWH_PLANT'
+        AND   low  = @p_werks.                        "added by Avinash : 26.09.2025 : ECDK933195
+
+        SELECT SINGLE werks
+                 FROM t001w
+                 INTO @DATA(ls_werks)
+                WHERE werks EQ @p_werks
+                  AND vkorg EQ @p_vkorg.
+        IF sy-subrc NE 0.
+
+          CALL METHOD lo_message_container->add_message
+            EXPORTING
+              iv_msg_type               = /iwbep/cl_cos_logger=>error
+              iv_msg_id                 = '00'
+              iv_msg_number             = '000'
+              iv_msg_text               = 'Invalid plant code selected.....'
+              iv_add_to_response_header = abap_true.
+          flag = 'X'.
+        ENDIF.
+
+        CLEAR: ls_select_option, wa_rng_werks.
+      ENDLOOP.
+    ENDIF.
+
+    DATA : lt_numbers TYPE TABLE OF string.
+    READ TABLE it_filter_select_options INTO ls_filter_select_options WITH KEY property = 'VBELN'.
+    IF ls_filter_select_options-property IS NOT INITIAL.
+      lt_select_options[] =  ls_filter_select_options-select_options[].
+      DELETE lt_select_options[] WHERE low = ''.
+      DESCRIBE TABLE lt_select_options[] LINES DATA(lv_lines).
+      DATA(ls_number) = lt_select_options[ 1 ].
+
+      IF ls_number-low CA ','.
+       clear lt_select_options[].
+        SPLIT ls_number-low AT ',' INTO TABLE lt_numbers.
+        LOOP AT lt_numbers INTO DATA(ls_num).
+          APPEND VALUE #( sign = 'I' option = 'EQ' low = ls_num
+          ) TO lt_select_options.
+        ENDLOOP.
+      ENDIF.
+      LOOP AT lt_select_options INTO ls_select_option.
+
+        wa_rng_vbeln-sign = ls_select_option-sign.
+        wa_rng_vbeln-option = ls_select_option-option.
+        lv_vbeln = ls_select_option-low.
+        CALL FUNCTION 'CONVERSION_EXIT_ALPHA_INPUT'
+          EXPORTING
+            input  = lv_vbeln
+          IMPORTING
+            output = lv_vbeln.
+        wa_rng_vbeln-low = lv_vbeln.
+        p_vbeln = ls_select_option-low.
+        CALL FUNCTION 'CONVERSION_EXIT_ALPHA_INPUT'
+          EXPORTING
+            input  = p_vbeln
+          IMPORTING
+            output = p_vbeln.
+        IF lv_lines GT 1. "added by avinash
+          READ TABLE lt_select_options INTO ls_select_option  INDEX lv_lines.
+          IF sy-subrc = 0.
+            lv_vbeln = ls_select_option-low.
+            wa_rng_vbeln-option = 'BT'.
+            CALL FUNCTION 'CONVERSION_EXIT_ALPHA_INPUT'
+              EXPORTING
+                input  = lv_vbeln
+              IMPORTING
+                output = lv_vbeln.
+            wa_rng_vbeln-high = lv_vbeln.
+          ENDIF.
+        ENDIF.
+        APPEND wa_rng_vbeln TO rng_vbeln.
+        CLEAR: ls_select_option, wa_rng_vbeln.
+      ENDLOOP.
+    ENDIF.
+    DELETE rng_vbeln WHERE low = ''.
+    READ TABLE it_filter_select_options INTO ls_filter_select_options WITH KEY property = 'FLAG'.
+    IF ls_filter_select_options-property IS NOT INITIAL.
+      lt_select_options[] =  ls_filter_select_options-select_options[].
+
+      LOOP AT lt_select_options INTO ls_select_option.
+        IF ls_select_option-low = '0'.
+          r1 = 'X'.
+        ELSEIF ls_select_option-low = '1'.
+          r2 = 'X'.
+        ENDIF.
+        CLEAR: ls_select_option.
+      ENDLOOP.
+    ENDIF.
+    IF r1 = 'X'.
+      SELECT SINGLE vbeln
+               FROM lips
+               INTO @DATA(l_vbeln)
+              WHERE vbeln = @p_vbeln
+              AND   werks = @p_werks.
+      IF sy-subrc NE 0.
+        .
+
+        CALL METHOD lo_message_container->add_message
+          EXPORTING
+            iv_msg_type               = /iwbep/cl_cos_logger=>error
+            iv_msg_id                 = '00'
+            iv_msg_number             = '000'
+            iv_msg_text               = 'Plant and document not matching.'
+            iv_add_to_response_header = abap_true.
+        flag = 'X'.
+        EXIT.
+
+      ENDIF.
+
+      SELECT SINGLE vbeln FROM vbfa INTO @DATA(lv_billdoc)
+  WHERE vbelv = @p_vbeln
+  AND   vbtyp_n = 'M'.
+      IF NOT lv_billdoc IS INITIAL.
+
+        CALL METHOD lo_message_container->add_message
+          EXPORTING
+            iv_msg_type               = /iwbep/cl_cos_logger=>error
+            iv_msg_id                 = '00'
+            iv_msg_number             = '000'
+            iv_msg_text               = 'Billing document created against Delivery....'
+            iv_add_to_response_header = abap_true.
+        flag = 'X'.
+        EXIT.
+      ENDIF.
+
+    ELSEIF r2 = 'X'.
+* Validation of delivery against VBFA table
+      SELECT vbeln
+        FROM likp
+        INTO TABLE @DATA(lt_likp)
+       WHERE vbeln IN @rng_vbeln.
+      LOOP AT lt_likp INTO DATA(ls_likp).
+        SELECT SINGLE vbeln FROM vbfa INTO @DATA(lv_shipno)
+          WHERE vbelv = @ls_likp-vbeln
+          AND   vbtyp_n = '8'.
+        IF NOT lv_shipno IS INITIAL.
+          CALL METHOD lo_message_container->add_message
+            EXPORTING
+              iv_msg_type               = /iwbep/cl_cos_logger=>error
+              iv_msg_id                 = '00'
+              iv_msg_number             = '000'
+              iv_msg_text               = 'Shipment already created against Delivery....'
+              iv_add_to_response_header = abap_true.
+          flag = 'X'.
+          EXIT.
+        ELSE.
+          CLEAR lv_billdoc.
+          SELECT SINGLE vbeln FROM vbfa INTO lv_billdoc
+            WHERE vbelv = ls_likp-vbeln
+            AND   vbtyp_n = 'M'.
+          IF NOT lv_billdoc IS INITIAL.
+            CALL METHOD lo_message_container->add_message
+              EXPORTING
+                iv_msg_type               = /iwbep/cl_cos_logger=>error
+                iv_msg_id                 = '00'
+                iv_msg_number             = '000'
+                iv_msg_text               = 'Billing document created against Delivery....'
+                iv_add_to_response_header = abap_true.
+            flag = 'X'.
+            EXIT.
+          ENDIF.
+        ENDIF.
+        CLEAR ls_likp.
+      ENDLOOP.
+
+      READ TABLE it_filter_select_options INTO ls_filter_select_options WITH KEY property = 'LIFNR'.
+      IF ls_filter_select_options-property IS NOT INITIAL.
+        lt_select_options[] =  ls_filter_select_options-select_options[].
+
+        LOOP AT lt_select_options INTO ls_select_option.
+
+          wa_rng_lifnr-sign = ls_select_option-sign.
+          wa_rng_lifnr-option = ls_select_option-option.
+          wa_rng_lifnr-low = ls_select_option-low.
+          p_lifnr = ls_select_option-low.
+          wa_rng_lifnr-high = ls_select_option-high.
+          APPEND wa_rng_lifnr TO rng_lifnr.
+          CLEAR: ls_select_option, wa_rng_lifnr.
+        ENDLOOP.
+        p_lifnr = |{ p_lifnr ALPHA = IN }|.
+        IF p_lifnr IS NOT INITIAL.
+
+          SELECT SINGLE *
+                 FROM lfa1
+                 INTO @DATA(ls_lfa1)
+                 WHERE lifnr = @p_lifnr
+                 AND ktokk = 'Z005'.          "#EC CI_ALL_FIELDS_NEEDED
+          IF sy-subrc NE 0.
+
+            CALL METHOD lo_message_container->add_message
+              EXPORTING
+                iv_msg_type               = /iwbep/cl_cos_logger=>error
+                iv_msg_id                 = '00'
+                iv_msg_number             = '000'
+                iv_msg_text               = 'Invalid transporter selected.....'
+                iv_add_to_response_header = abap_true.
+            flag = 'X'.
+            EXIT.
+          ENDIF.
+        ENDIF.
+      ENDIF.
+    ENDIF.
+
+    SELECT a~vbeln a~posnr a~matnr a~werks a~kdmat b~kunag a~lfimg
+          a~meins a~vgbel a~vgpos a~vtweg a~spart b~vstel a~lgort "added byAvinash : 26.09.2025 : ECDK933195
+     FROM lips AS a INNER JOIN likp AS b
+     ON a~vbeln = b~vbeln
+     INTO TABLE gt_lips
+     WHERE a~vbeln IN rng_vbeln
+     AND a~werks EQ p_werks
+       AND b~vkorg EQ p_vkorg.
+    IF gt_lips IS INITIAL.
+
+      CALL METHOD lo_message_container->add_message
+        EXPORTING
+          iv_msg_type               = /iwbep/cl_cos_logger=>error
+          iv_msg_id                 = '00'
+          iv_msg_number             = '000'
+          iv_msg_text               = 'Data not found.....'
+          iv_add_to_response_header = abap_true.
+      flag = 'X'.
+      EXIT.
+    ENDIF.
+
+    DATA(lt_lips) = gt_lips[].
+    SORT lt_lips BY werks matnr.
+    DELETE ADJACENT DUPLICATES FROM lt_lips COMPARING werks matnr.
+    IF r2 = 'X'.
+      DATA(lt_vstel) = gt_lips[].
+      SORT lt_vstel BY vstel.
+      DELETE ADJACENT DUPLICATES FROM lt_vstel COMPARING vstel.
+      DESCRIBE TABLE lt_vstel LINES DATA(ln).
+      IF ln NE '1'.
+
+        CALL METHOD lo_message_container->add_message
+          EXPORTING
+            iv_msg_type               = /iwbep/cl_cos_logger=>error
+            iv_msg_id                 = '00'
+            iv_msg_number             = '000'
+            iv_msg_text               = 'Different Shipping point delivery selected..'
+            iv_add_to_response_header = abap_true.
+        flag = 'X'.
+        EXIT.
+
+        CLEAR gv_vstel.
+        READ TABLE lt_vstel INTO DATA(ls_vstel) INDEX 1.
+        gv_vstel = ls_vstel-vstel.
+      ENDIF.
+    ENDIF.
+    READ TABLE lt_lips INTO DATA(ls_lips7) INDEX 1.
+
+    DATA(gv_lgort) = ls_lips7-lgort. "added by avinash 04.02.2026
+
+    IF flag = ' '.
+*start insert Avinash : 26.09.2025 : ECDK933195
+      IF gv_ewh = 'X'.
+*        IF gv_lgort = '1120'.
+        IF gv_lgort = '1120' or gv_lgort = '1159'."replace by avinash 6000001973:ECDK933860:29.04.2026
+          SELECT werks matnr kunnr pkgno labno  FROM zsd_cust_fg_st INTO TABLE gt_st
+          FOR ALL ENTRIES IN lt_lips
+          WHERE werks = lt_lips-lgort
+          AND   matnr = lt_lips-matnr
+          AND   kunnr = lt_lips-kunag
+          AND   vbeln = ''.
+        ENDIF.
+
+        SELECT werks matnr kunnr  pkgno labno FROM zsd_cust_fg_st
+                APPENDING TABLE gt_st
+                FOR ALL ENTRIES IN lt_lips
+                WHERE werks = lt_lips-werks
+                AND   matnr = lt_lips-matnr           "added by avinash 04.02.2026
+                AND   kunnr = lt_lips-kunag
+                AND   vbeln = ''.
+*End insert Avinash : 26.09.2025 : ECDK933195
+      ELSE.
+        SELECT werks matnr kunnr pkgno labno  FROM zsd_cust_fg_st INTO TABLE gt_st
+        FOR ALL ENTRIES IN lt_lips
+        WHERE werks = lt_lips-werks
+        AND   matnr = lt_lips-matnr
+        AND   kunnr = lt_lips-kunag
+        AND   vbeln = ''.
+      ENDIF.
+      IF NOT gt_st IS INITIAL.
+        SORT gt_st BY werks matnr kunnr pkgno labno.
+        DELETE ADJACENT DUPLICATES FROM gt_st COMPARING ALL FIELDS.
+      ENDIF.
+
+      SELECT werks matnr  kunnr pkgno labno vbeln FROM zsd_cust_fg_st INTO CORRESPONDING FIELDS OF TABLE gt_st7
+      WHERE vbeln IN rng_vbeln.
+
+      IF NOT gt_lips IS INITIAL.
+        DATA lv_qty TYPE lips-lfimg.
+        SELECT werks,
+               matnr,
+               kunnr,
+               kdmat
+          FROM zsd_cust_fg_pk
+          INTO TABLE @DATA(lt_kdmat_pk)
+          FOR ALL ENTRIES IN @gt_lips
+          WHERE werks = @gt_lips-werks
+            AND matnr = @gt_lips-matnr
+            AND kunnr = @gt_lips-kunag.
+        LOOP AT gt_lips INTO DATA(ls_lips).
+          MOVE-CORRESPONDING ls_lips TO gw_dtl.
+          SELECT SINGLE maktx FROM makt INTO gw_dtl-maktx
+            WHERE matnr = gw_dtl-matnr
+            AND   spras = sy-langu.
+
+          CLEAR lv_qty.
+*          LOOP AT gt_st7 INTO DATA(ls_st) WHERE werks = gw_dtl-werks
+*                                          AND   matnr = gw_dtl-matnr.
+                LOOP AT gt_st7 INTO DATA(ls_st) WHERE matnr = gw_dtl-matnr
+                                      AND   kunnr = gw_dtl-kunag
+                                      AND   vbeln = gw_dtl-vbeln.
+            lv_qty = lv_qty + 1.
+            CLEAR : ls_st.
+          ENDLOOP.
+          gw_dtl-pkgno = lv_qty.
+
+          APPEND gw_dtl TO gt_dtl.
+          es_entity-vbeln = gw_dtl-vbeln.
+          es_entity-werks = gw_dtl-werks.
+          es_entity-posnr = gw_dtl-posnr.
+          es_entity-maktx = gw_dtl-maktx.
+          es_entity-pkgno = gw_dtl-pkgno.
+          es_entity-meins = gw_dtl-meins.
+          es_entity-lfimg = gw_dtl-lfimg.
+          es_entity-matnr = gw_dtl-matnr.
+          CALL FUNCTION 'CONVERSION_EXIT_ALPHA_OUTPUT'
+            EXPORTING
+              input  = gw_dtl-kunag
+            IMPORTING
+              output = gw_dtl-kunag.
+
+
+          es_entity-kunnr = gw_dtl-kunag.
+          es_entity-tabname = 'GT_DTL'.
+          READ TABLE lt_kdmat_pk INTO DATA(lwa_kdmat_pk) WITH KEY werks = es_entity-werks
+                                                            matnr = es_entity-matnr.
+          IF sy-subrc = 0.
+            es_entity-kdmat = lwa_kdmat_pk-kdmat.
+          ENDIF.
+          APPEND es_entity TO et_entityset.
+          CLEAR es_entity.
+          CLEAR : ls_lips, gw_dtl.
+        ENDLOOP.
+        SORT gt_st7 BY werks matnr labno.
+        LOOP AT gt_st7 INTO ls_st.
+          es_entity-werks = ls_st-werks.
+          es_entity-matnr = ls_st-matnr.
+          es_entity-pkgno = ls_st-pkgno.
+          es_entity-labno = ls_st-labno.
+          es_entity-vbeln = ls_st-vbeln.
+          CALL FUNCTION 'CONVERSION_EXIT_ALPHA_OUTPUT'
+            EXPORTING
+              input  = ls_st-kunnr
+            IMPORTING
+              output = ls_st-kunnr.
+
+          es_entity-kunnr = ls_st-kunnr.
+          es_entity-tabname = 'GT_ST7'.
+          APPEND es_entity TO et_entityset.
+          CLEAR: es_entity, ls_st.
+        ENDLOOP.
+        SORT gt_st BY werks matnr labno.
+        LOOP AT gt_st INTO ls_st.
+          es_entity-werks = ls_st-werks.
+          es_entity-matnr = ls_st-matnr.
+          es_entity-pkgno = ls_st-pkgno.
+          es_entity-labno = ls_st-labno.
+          CALL FUNCTION 'CONVERSION_EXIT_ALPHA_OUTPUT'
+            EXPORTING
+              input  = ls_st-kunnr
+            IMPORTING
+              output = ls_st-kunnr.
+
+          es_entity-kunnr = ls_st-kunnr.
+          es_entity-tabname = 'GT_ST'.
+          APPEND es_entity TO et_entityset.
+          CLEAR: es_entity, ls_st.
+        ENDLOOP.
+      ENDIF.
+    ENDIF.
+
+  ENDMETHOD.
+
+
+  method ET_LABNOSET_GET_ENTITYSET.
+        DATA : lv_werks TYPE werks_d,
+           lv_matnr TYPE matnr,
+           lv_kunnr TYPE kunnr.
+
+    IF line_exists( it_filter_select_options[ property = |WERKS| ] ).
+      lv_werks = it_filter_select_options[ property = |WERKS| ]-select_options[ 1 ]-low.
+    ENDIF.
+    IF line_exists( it_filter_select_options[ property = |MATNR| ] ).
+      lv_matnr = it_filter_select_options[ property = |MATNR| ]-select_options[ 1 ]-low.
+    ENDIF.
+    IF line_exists( it_filter_select_options[ property = |KUNNR| ] ).
+      lv_kunnr = it_filter_select_options[ property = |KUNNR| ]-select_options[ 1 ]-low.
+    ENDIF.
+   lv_kunnr = |{ lv_kunnr ALPHA = IN }|.
+    SELECT * FROM zsd_cust_fg_st
+      INTO TABLE @DATA(GT_SET)
+      WHERE WERKS = @LV_WERKS
+      AND  MATNR = @LV_MATNR
+      AND  KUNNR = @LV_KUNNR
+      and  VBELV = ''.
+
+    ET_ENTITYSET = CORRESPONDING #( GT_SET ).
+    sort et_entityset by labno ASCENDING.
+    delete ADJACENT DUPLICATES FROM et_entityset COMPARING labno.
+  endmethod.
+
+
+  method ET_LIFNRSET_GET_ENTITYSET.
+    SELECT * FROM lfa1
+             INTO CORRESPONDING FIELDS OF TABLE et_entityset
+             WHERE ktokk = 'Z005'.
+
+  endmethod.
+
+
+  method ET_LOADTYSET_GET_ENTITYSET.
+ SELECT * FROM vtadd02t INTO CORRESPONDING FIELDS OF TABLE et_entityset.
+  endmethod.
+
+
+  method ET_MODTYPESET_GET_ENTITYSET.
+SELECT * FROM vtadd03t INTO CORRESPONDING FIELDS OF TABLE et_entityset.
+  endmethod.
+
+
+  METHOD et_packageset_create_entity.
+    DATA lv_kunnr TYPE kunnr.
+
+    DATA : gs_entity TYPE zcl_zsd_cust_fg_mpc=>ts_et_package.
+    TRY.
+        CALL METHOD io_data_provider->read_entry_data
+          IMPORTING
+            es_data = gs_entity.
+      CATCH /iwbep/cx_mgw_tech_exception.
+    ENDTRY.
+    lv_kunnr = gs_entity-kunnr.
+    lv_kunnr = |{ lv_kunnr ALPHA = IN }|.
+    DELETE FROM zsd_cust_fg_st WHERE matnr = gs_entity-matnr
+        AND werks = gs_entity-werks
+        AND  srnos = gs_entity-serial
+        AND kunnr = lv_kunnr
+        AND  mjahr = gs_entity-year.
+
+    er_entity-no = gs_entity-no - 1.
+    er_entity-matnr = 'S'.
+    er_entity-maktx = 'Recored deleted succefully'.
+
+  ENDMETHOD.
+
+
+  METHOD et_packageset_delete_entity.
+    DATA: ls_entityset    TYPE zsd_ford_fg_st,
+          ls_key_tab      TYPE /iwbep/s_mgw_name_value_pair,
+          lv_error_entity TYPE string,
+          lv_matnr(18)    TYPE c,
+          lv_werks        TYPE werks_d,
+          lv_srnos        TYPE zsrno,
+          lv_mjahr        TYPE mjahr,
+          lv_kunnr        TYPE kunnr.
+
+    LOOP AT it_key_tab INTO DATA(lwa_key_tab).
+      CASE lwa_key_tab-name.
+        WHEN 'MATNR'.
+          lv_matnr = lwa_key_tab-value.
+          lv_matnr =  |{ lv_matnr ALPHA = IN }|.
+
+        WHEN 'MJAHR'.
+          lv_mjahr = lwa_key_tab-value.
+        WHEN 'SERIAL'.
+          lv_srnos = lwa_key_tab-value.
+        WHEN 'WERKS'.
+          lv_werks = lwa_key_tab-value.
+        WHEN 'KUNNR'.
+          lv_kunnr = lwa_key_tab-value.
+      ENDCASE.
+    ENDLOOP.
+
+    DELETE FROM zsd_cust_fg_st WHERE matnr = lv_matnr
+    AND werks = lv_werks
+    AND  srnos = lv_srnos
+    AND kunnr = lv_kunnr
+    AND  mjahr = lv_mjahr.
+
+  ENDMETHOD.
+
+
+  METHOD et_packageset_get_entityset.
+    DATA : lv_werks TYPE werks_d,
+           lv_matnr TYPE matnr,
+           lv_kunnr TYPE kunnr,
+           lv_labno TYPE zlabno.
+    DATA : es_entityset LIKE LINE OF et_entityset.
+    DATA lo_cotainer TYPE REF TO /iwbep/if_message_container.
+    IF line_exists( it_filter_select_options[ property = |WERKS| ] ).
+      lv_werks = it_filter_select_options[ property = |WERKS| ]-select_options[ 1 ]-low.
+    ENDIF.
+    IF line_exists( it_filter_select_options[ property = |MATNR| ] ).
+      lv_matnr = it_filter_select_options[ property = |MATNR| ]-select_options[ 1 ]-low.
+    ENDIF.
+    IF line_exists( it_filter_select_options[ property = |KUNNR| ] ).
+      lv_kunnr = it_filter_select_options[ property = |KUNNR| ]-select_options[ 1 ]-low.
+    ENDIF.
+    IF line_exists( it_filter_select_options[ property = |LABNO| ] ).
+      lv_labno = it_filter_select_options[ property = |LABNO| ]-select_options[ 1 ]-low.
+    ENDIF.
+    lo_cotainer = me->mo_context->get_message_container( ).
+    lv_kunnr = |{ lv_kunnr ALPHA = IN }|.
+
+   IF lv_werks IS NOT INITIAL.
+      SELECT SINGLE * FROM t001w INTO @DATA(ls_plant)
+       WHERE werks = @lv_werks.
+      IF sy-subrc NE 0.
+        CALL METHOD lo_cotainer->add_message
+          EXPORTING
+            iv_msg_type               = /iwbep/cl_cos_logger=>error
+            iv_msg_id                 = '00'
+            iv_msg_number             = '000'
+            iv_msg_text               = 'Please Enter valid plant..'
+            iv_add_to_response_header = abap_true.
+        EXIT.
+      ENDIF.
+    ENDIF.
+    IF lv_matnr IS NOT INITIAL.
+      SELECT SINGLE matnr FROM marc INTO @DATA(ls_matnr)
+     WHERE matnr = @lv_matnr
+     AND   werks = @lv_werks.
+      IF sy-subrc NE 0.
+        CALL METHOD lo_cotainer->add_message
+          EXPORTING
+            iv_msg_type               = /iwbep/cl_cos_logger=>error
+            iv_msg_id                 = '00'
+            iv_msg_number             = '000'
+            iv_msg_text               = 'Material not found in plant..'
+            iv_add_to_response_header = abap_true.
+        EXIT.
+      ENDIF.
+    ENDIF.
+    IF lv_kunnr IS NOT INITIAL.
+      SELECT SINGLE name1 FROM kna1 INTO @DATA(ls_kunnr)
+      WHERE kunnr = @lv_kunnr.
+      IF sy-subrc NE 0.
+        CALL METHOD lo_cotainer->add_message
+          EXPORTING
+            iv_msg_type               = /iwbep/cl_cos_logger=>error
+            iv_msg_id                 = '00'
+            iv_msg_number             = '000'
+            iv_msg_text               = 'customer not found..'
+            iv_add_to_response_header = abap_true.
+        EXIT.
+      ENDIF.
+    ENDIF.
+    IF lv_labno IS  INITIAL.
+      SELECT SINGLE * FROM zsd_cust_fg_pk
+        WHERE werks = @lv_werks
+        AND matnr = @lv_matnr
+        AND kunnr = @lv_kunnr
+        INTO @DATA(gs_pack).
+
+
+      IF sy-subrc NE 0.
+
+
+        CALL METHOD lo_cotainer->add_message
+          EXPORTING
+            iv_msg_type               = /iwbep/cl_cos_logger=>error
+            iv_msg_id                 = '00'
+            iv_msg_number             = '000'
+            iv_msg_text               = 'Please maintain Packaging details..'
+            iv_add_to_response_header = abap_true.
+        EXIT.
+
+      ELSE.
+        IF gs_pack-pkgno IS INITIAL.
+          CALL METHOD lo_cotainer->add_message
+            EXPORTING
+              iv_msg_type               = /iwbep/cl_cos_logger=>error
+              iv_msg_id                 = '00'
+              iv_msg_number             = '000'
+              iv_msg_text               = 'Please maintain Number of Packaging ...'
+              iv_add_to_response_header = abap_true.
+          EXIT.
+        ENDIF.
+        es_entityset  = CORRESPONDING #( gs_pack ).
+        APPEND es_entityset TO et_entityset.
+      ENDIF.
+    ELSE.
+      SELECT SINGLE * FROM zsd_cust_fg_pk
+  WHERE werks = @lv_werks
+  AND matnr = @lv_matnr
+  AND kunnr = @lv_kunnr
+  INTO @DATA(gs_pack1).
+      SELECT * FROM zsd_cust_fg_st INTO TABLE @DATA(lt_pack)
+        WHERE werks = @lv_werks
+        AND   matnr = @lv_matnr
+        AND   kunnr = @lv_kunnr
+        AND   labno = @lv_labno.
+      IF sy-subrc NE 0.
+        CALL METHOD lo_cotainer->add_message
+          EXPORTING
+            iv_msg_type               = /iwbep/cl_cos_logger=>error
+            iv_msg_id                 = '00'
+            iv_msg_number             = '000'
+            iv_msg_text               = 'Data not found for selection ...'
+            iv_add_to_response_header = abap_true.
+        EXIT.
+      ENDIF.
+      DESCRIBE TABLE lt_pack LINES DATA(lv_lines).
+      LOOP AT lt_pack INTO DATA(ls_pack).
+        es_entityset = CORRESPONDING #( ls_pack ).
+        es_entityset-no    = lv_lines.
+        es_entityset-pkgno = gs_pack1-pkgno.
+        es_entityset-maktx =  gs_pack1-maktx.
+        es_entityset-year  = ls_pack-mjahr.
+        es_entityset-date  = ls_pack-sdate.
+        es_entityset-serial = ls_pack-srnos.
+        APPEND es_entityset TO et_entityset.
+
+      ENDLOOP.
+
+    ENDIF.
+  ENDMETHOD.
+
+
+  method ET_PLANTSET_GET_ENTITYSET.
+    SELECT werks , name1 from t001w INTO TABLE @et_entityset.
+  endmethod.
+
+
+  method ET_PRINTSET_GET_ENTITY.
+
+
+*CALL METHOD SUPER->ET_PRINTSET_GET_ENTITY
+*  EXPORTING
+*    IV_ENTITY_NAME          =
+*    IV_ENTITY_SET_NAME      =
+*    IV_SOURCE_NAME          =
+*    IT_KEY_TAB              =
+**    io_request_object       =
+**    io_tech_request_context =
+*    IT_NAVIGATION_PATH      =
+**  IMPORTING
+**    er_entity               =
+**    es_response_context     =
+*    .
+**  CATCH /iwbep/cx_mgw_busi_exception.
+**  CATCH /iwbep/cx_mgw_tech_exception.
+**ENDTRY.
+  endmethod.
+
+
+  method ET_SUBMITSET_CREATE_ENTITY.
+    DATA : gt_entity TYPE zcl_zsd_cust_fg_mpc=>tt_et_submit.
+    TRY.
+        CALL METHOD io_data_provider->read_entry_data
+          IMPORTING
+            es_data = gt_entity.
+      CATCH /iwbep/cx_mgw_tech_exception.
+    ENDTRY.
+  endmethod.
+
+
+  method ET_VEHTYPESET_DELETE_ENTITY.
+  endmethod.
+
+
+  method ET_VEHTYPESET_GET_ENTITYSET.
+    SELECT * FROM vtadd01t INTO CORRESPONDING FIELDS OF TABLE et_entityset
+      WHERE spras EQ sy-langu.
+  endmethod.
+ENDCLASS.
